@@ -1,0 +1,59 @@
+/*:
+ * @target MZ
+ * @plugindesc v1.0.1 (MV/MZ) — Variables, inventaire, acteurs et traductions anglaises.
+ * @author RPGM Toolkit
+ *
+ * @param Hotkey
+ * @text Touche d'ouverture
+ * @type select
+ * @option F6
+ * @option F7
+ * @option F10
+ * @default F6
+ *
+ * @param ShowButton
+ * @text Afficher le bouton Toolkit
+ * @type boolean
+ * @default true
+ *
+ * @param PlaytestOnly
+ * @text Uniquement en test
+ * @type boolean
+ * @default false
+ *
+ * @param PageSize
+ * @text Entrées par page (20–80)
+ * @type number
+ * @min 20
+ * @max 80
+ * @default 60
+ *
+ * @command Open
+ * @text Ouvrir le Toolkit
+ * @command Close
+ * @text Fermer le Toolkit
+ *
+ * @help
+ * RPGM Toolkit 1.0.1 — RPG Maker MV 1.6+ / MZ
+ * Copiez ce fichier dans js/plugins, puis activez RPGMToolkit en dernier
+ * dans le gestionnaire de plugins. Chargez une partie et appuyez sur F6.
+ * Disponible sur la carte ; le jeu est mis en pause pendant l'édition.
+ *
+ * Variables : noms, ID, value:42, id:10-50, favoris, repère de comparaison.
+ * Interrupteurs globaux et locaux de la carte courante.
+ * Objets / armes / armures : recherche, quantité, ajout, retrait.
+ * Acteurs : HP, MP, TP, niveau, EXP, compétences, états, équipement.
+ * Annuler/rétablir : variables, interrupteurs, inventaire et or (80 actions).
+ * Les actions acteurs vident la pile d'annulation ; elles restent au journal.
+ *
+ * Les noms anglais sont des alias d'affichage stockés localement par jeu.
+ * Les données d'origine ne sont jamais renommées. Les alias peuvent être
+ * saisis ou importés hors ligne. MyMemory traduit sur clic explicite ;
+ * seuls les noms choisis sont envoyés. Internet et quota disponible requis.
+ *
+ * MV : commande de plugin RPGMToolkit Open / RPGMToolkit Close
+ * MZ : commandes Ouvrir / Fermer le Toolkit
+ * Script : RPGMToolkit.open() / close() / toggle()
+ * Les changements de partie deviennent permanents via la sauvegarde du jeu.
+ * Aucun autosave ajouté. Voir LIRE-MOI.md pour les limites et l'installation.
+ */

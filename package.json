@@ -1,0 +1,13 @@
+{
+  "name": "rpgm-toolkit",
+  "version": "1.0.1",
+  "private": true,
+  "scripts": {
+    "build:mod": "node plugin/build.cjs",
+    "test": "node --test plugin/tests/core.test.cjs plugin/tests/translation.test.cjs android/tests/scene-lifecycle.test.cjs",
+    "test:installer": "pwsh -NoProfile -ExecutionPolicy Bypass -File plugin/tests/installer.test.ps1"
+  },
+  "devDependencies": {
+    "playwright": "1.58.2"
+  }
+}
