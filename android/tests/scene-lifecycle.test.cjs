@@ -82,3 +82,13 @@ for(const engine of ['MV','MZ']){
   });
  });
 }
+
+test('battle windows must be started before Toolbox checks busy state',async()=>{
+ await run('MZ',true,async page=>{
+  const result=await page.evaluate(()=>{
+   Scene_Battle=function(){this.started=false;};Scene_Battle.prototype.isStarted=function(){return this.started;};Scene_Battle.prototype.isBusy=function(){if(!this.started)throw Error('Early battle window');return false;};
+   SceneManager._scene=new Scene_Battle();const refused=!RPGMToolkit.open();SceneManager._scene.started=true;$gameParty.inBattle=()=>true;
+   return {refused,opened:RPGMToolkit.open()};
+  });assert.deepEqual(result,{refused:true,opened:true});
+ });
+});

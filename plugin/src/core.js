@@ -3,7 +3,7 @@ function createToolkitRuntime(g, storage) {
     'use strict';
     var kinds = ['variables', 'switches', 'items', 'weapons', 'armors', 'actors', 'skills', 'states', 'selfSwitches'];
     var cache = {}, history = [], redo = [], log = [], baseline = {}, session = null;
-    var prefs = { english: true, source: 'ja', favorites: {}, aliases: {} };
+    var prefs = { english: true, source: 'ja', favorites: {}, aliases: {}, settings: { language:'fr', fontSize:13, scrollbarWidth:24, pageSize:0, hotkey:'', showButton:true } };
     var storageWarning = false, frozen = {}, hooks = [], writing = false;
     function own(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
     function normal(value) {
@@ -24,6 +24,13 @@ function createToolkitRuntime(g, storage) {
     function validAlias(a) { return a && typeof a.original === 'string' && typeof a.english === 'string' && a.original.length <= 2000 && a.english.length <= 2000; }
     try {
         var saved = JSON.parse(storage.getItem(storageKey) || '{}');
+        var settings = saved.settings || {};
+        if (['fr','en'].indexOf(settings.language) >= 0) prefs.settings.language = settings.language;
+        if ([12,13,15,17].indexOf(settings.fontSize) >= 0) prefs.settings.fontSize = settings.fontSize;
+        if ([18,24,32].indexOf(settings.scrollbarWidth) >= 0) prefs.settings.scrollbarWidth = settings.scrollbarWidth;
+        if ([20,40,60,80].indexOf(settings.pageSize) >= 0) prefs.settings.pageSize = settings.pageSize;
+        if (['F6','F7','F10'].indexOf(settings.hotkey) >= 0) prefs.settings.hotkey = settings.hotkey;
+        if (typeof settings.showButton === 'boolean') prefs.settings.showButton = settings.showButton;
         if (typeof saved.english === 'boolean') prefs.english = saved.english;
         if (/^[a-z]{2}(-[A-Za-z]{2,4})?$/.test(saved.source || '')) prefs.source = saved.source;
         Object.keys(saved.favorites || {}).slice(0, 50000).forEach(function(k) { if (/^[a-zA-Z]+:[0-9]+(?:\.[0-9]+\.[A-D])?$/.test(k)) prefs.favorites[k] = !!saved.favorites[k]; });
@@ -307,6 +314,11 @@ function createToolkitRuntime(g, storage) {
         savePrefs();
     }
     function setAlias(r, text) { setAliases([r], text); }
+    function clearAliases() {
+        prefs.aliases = {};
+        savePrefs();
+        return !storageWarning;
+    }
     function importAliases(payload) {
         if (!payload || payload.format !== 'rpgm-toolkit-translations-v1' || !Array.isArray(payload.entries) || payload.entries.length > 50000) throw new Error('Dictionnaire JSON non reconnu.');
         var lookup = {}, staged = [], skipped = 0;
@@ -329,7 +341,7 @@ function createToolkitRuntime(g, storage) {
         canUndo: function() { ensureSession(); return history.length > 0; }, canRedo: function() { ensureSession(); return redo.length > 0; },
         log: function() { ensureSession(); return log; }, capture: capture, changed: changed,
         refresh: function() { ensureSession(); cache = {}; }, savePrefs: savePrefs, storageWarning: function() { return storageWarning; },
-        setAlias: setAlias, setAliases: setAliases, importAliases: importAliases,
+        setAlias: setAlias, setAliases: setAliases, clearAliases: clearAliases, importAliases: importAliases,
         exportAliases: function() {
             return { format: 'rpgm-toolkit-translations-v1', project: project, entries: Object.keys(prefs.aliases).map(function(k) { return { key: k, original: prefs.aliases[k].original, english: prefs.aliases[k].english }; }) };
         }

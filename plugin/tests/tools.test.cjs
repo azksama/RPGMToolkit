@@ -43,3 +43,19 @@ test('teleport uses catalog and map bounds without replacing current data, rejec
  const current=await tools.loadMap(3);assert.equal(current.width,20);
  const pending=tools.loadMap(4);g.$gameVariables=new g.Game_Variables();xhr.status=200;xhr.responseText='{"width":40,"height":30}';xhr.onload();await assert.rejects(pending,/partie/);
 });
+
+test('enemy resources use troop instances only during battle; quick actions clamp independently',()=>{
+ const {g,r,tools}=setup();let battle=true;g.$gameParty.inBattle=()=>battle;
+ const make=(hp,max)=>({hp,mhp:max,mp:20,mmp:50,tp:5,maxTp:()=>100,setHp(v){this.hp=v;},setMp(v){this.mp=v;},setTp(v){this.tp=v;}});
+ const first=make(2500,4000),second=make(100,800);g.$gameTroop={members:()=>[first,second]};const player=r.actor(1),hp=player.hp;
+ tools.adjustResource('enemies','hp','subtract');assert.deepEqual([first.hp,second.hp],[1500,0]);assert.equal(player.hp,hp);
+ tools.adjustResource('enemy:0','hp','add');assert.equal(first.hp,2500);tools.adjustResource('enemy:0','hp','zero');assert.equal(first.hp,0);
+ tools.resources('enemy:1',400,30,10,false);assert.deepEqual([second.hp,second.mp,second.tp],[400,30,10]);
+ tools.adjustResource('enemies','mp','add');assert.deepEqual([first.mp,second.mp],[50,50]);
+ battle=false;assert.throws(()=>tools.resources('enemy:0',100,0,0,false),/ennemi/);assert.equal(first.hp,0);
+});
+test('stat quick actions reset bonuses, clamp level and reject invalid actions',()=>{
+ const {r,tools}=setup(),a=r.actor(1);tools.stat(1,'2',50);tools.adjustStat(1,'2','add');assert.equal(a._paramPlus[2],1050);
+ tools.adjustStat(1,'2','subtract');assert.equal(a._paramPlus[2],50);tools.adjustStat(1,'2','zero');assert.equal(a._paramPlus[2],0);
+ tools.adjustStat(1,'level','zero');assert.equal(a.level,1);tools.adjustStat(1,'level','add');assert.equal(a.level,99);assert.throws(()=>tools.adjustStat(1,'2','bad'));
+});

@@ -2,7 +2,7 @@ const {test}=require('node:test'),assert=require('node:assert/strict'),fs=requir
 const {chromium}=require('playwright');
 const pluginRoot=path.resolve(__dirname,'../../plugin');
 async function swipe(page,selector){
- const box=await page.locator(selector).boundingBox(),cdp=await page.context().newCDPSession(page),x=Math.round(box.x+box.width-4),y=Math.round(box.y+box.height*.8),distance=Math.min(150,box.height*.65);
+ const box=await page.locator(selector).boundingBox(),cdp=await page.context().newCDPSession(page),x=Math.round(box.x+4),y=Math.round(box.y+box.height*.8),distance=Math.min(150,box.height*.65);
  await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y}]});
  for(let i=1;i<=8;i++)await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x,y:Math.round(y-distance*i/8)}]});
  await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await cdp.detach();
@@ -22,18 +22,18 @@ test('Toolbox submenus, hostile touch cancellation, clipped modal panning, icons
     await page.locator('[data-action="tool-'+mode+'"]').click();assert(await page.locator('.rt-modal').isVisible());
     const dialog=await page.locator('.rt-modal-dialog').boundingBox();assert(dialog.y>=0&&dialog.y+dialog.height<=height+1);
     if(mode==='god'||mode==='noclip'){
-     await page.locator('[data-action="tool-toggle-'+mode+'"]').click();assert.equal(await page.locator('[data-action="tool-toggle-'+mode+'"]').getAttribute('aria-pressed'),'true');
-     await page.locator('[data-action="tool-toggle-'+mode+'"]').click();
+     await page.locator('#rt-tool-toggle').check();assert(await page.locator('#rt-tool-toggle').isChecked());
+     await page.locator('#rt-tool-toggle').uncheck();
     }
     if(mode==='resources'){await page.locator('[data-action="tool-heal"]').click();assert.equal(await page.evaluate(()=>$gameActors.actor(1).hp),500);}
     if(mode==='stats'){await page.locator('#rt-tool-param').selectOption('2');await page.locator('#rt-tool-value').fill('25');await page.locator('[data-form="tool-stats"] button[type="submit"]').click();assert.equal(await page.evaluate(()=>$gameActors.actor(1)._paramPlus[2]),25);}
     if(mode==='teleport')assert(await page.locator('#rt-map-go').isEnabled());
     if(mode==='translations'){
      assert.equal(await page.locator('#rt-translation-scope').inputValue(),'all');
-     await swipe(page,'.rt-modal-content');assert(await page.locator('.rt-modal-content').evaluate(e=>e.scrollTop>10),'modal touch pan despite prevented default');
+     await swipe(page,'.rt-modal-content');assert(await page.locator('.rt-modal-content').evaluate(e=>e.scrollHeight<=e.clientHeight || e.scrollTop>10),'modal touch pan despite prevented default');
      await page.locator('.rt-modal-content').evaluate(e=>e.scrollTop=0);
-     const box=await page.locator('.rt-modal-content').boundingBox();await page.mouse.move(box.x+box.width-4,box.y+box.height*.8);await page.mouse.down();await page.mouse.move(box.x+box.width-4,box.y+box.height*.2,{steps:8});await page.mouse.up();
-     assert(await page.locator('.rt-modal-content').evaluate(e=>e.scrollTop>10),'mouse pan');
+     const box=await page.locator('.rt-modal-content').boundingBox();await page.mouse.move(box.x+4,box.y+box.height*.8);await page.mouse.down();await page.mouse.move(box.x+4,box.y+box.height*.2,{steps:8});await page.mouse.up();
+     assert(await page.locator('.rt-modal-content').evaluate(e=>e.scrollHeight<=e.clientHeight || e.scrollTop>10),'mouse pan');
      await page.getByRole('button',{name:'Tout traduire',exact:true}).click();await page.waitForFunction(()=>document.querySelector('[data-action="translate-stop"]').disabled);
      assert(requests.length>80,'all pages translated');assert.equal(new Set(requests).size,requests.length,'deduplicated requests');
      assert.match(await page.locator('#rt-translation-count').textContent(),/^0 nom/);
@@ -47,6 +47,35 @@ test('Toolbox submenus, hostile touch cancellation, clipped modal panning, icons
    await page.addScriptTag({path:require.resolve('axe-core/axe.min.js')});assert.deepEqual(await page.evaluate(async()=>(await axe.run(document,{runOnly:{type:'tag',values:['wcag2a','wcag2aa']}})).violations.map(v=>v.id)),[]);
    if(process.env.RPGM_SCREENSHOTS){fs.mkdirSync(process.env.RPGM_SCREENSHOTS,{recursive:true});await page.screenshot({path:path.join(process.env.RPGM_SCREENSHOTS,'toolbox-'+width+'.png')});}
    const before=requests.length;await page.reload();await page.locator('.rt-launch').click();await page.locator('[data-action="tool-translations"]').click();assert.match(await page.locator('#rt-translation-count').textContent(),/^0 nom/);assert.equal(requests.length,before);assert(await page.getByRole('button',{name:'Tout traduire',exact:true}).isDisabled());
+   await page.getByRole('button',{name:'Supprimer',exact:true}).click();
+   assert(!await page.getByRole('button',{name:'Tout traduire',exact:true}).isDisabled());
+   await page.reload();await page.locator('.rt-launch').click();await page.locator('[data-action="tool-settings"]').click();
+   const rail=page.locator('.rt-modal-dialog > .rt-scrollbar');assert.equal((await rail.boundingBox()).width,24);
+   const rect=await rail.boundingBox();await page.mouse.click(rect.x+12,rect.y+rect.height-10);
+   assert(await page.locator('.rt-modal-content').evaluate(e=>e.scrollHeight<=e.clientHeight || e.scrollTop>0));
+   if(process.env.RPGM_SCREENSHOTS){await page.screenshot({path:path.join(process.env.RPGM_SCREENSHOTS,'settings-fr-'+width+'.png')});}
+   await page.locator('[data-setting="language"]').selectOption('en');await page.waitForFunction(()=>document.querySelector('#rt-modal-title').textContent==='Settings');
+   await page.locator('[data-setting="scrollbarWidth"]').selectOption('32');assert.equal((await rail.boundingBox()).width,32);
+   await page.locator('[data-setting="pageSize"]').selectOption('40');await page.locator('[data-setting="fontSize"]').selectOption('15');
+   await page.reload();await page.locator('.rt-launch').click();assert.equal(await page.locator('[data-action="tool-editors"] strong').textContent(),'Editors');
+   await page.locator('[data-action="tool-settings"]').click();assert.equal(await page.locator('[data-setting="language"]').inputValue(),'en');assert.equal(await page.locator('[data-setting="scrollbarWidth"]').inputValue(),'32');if(process.env.RPGM_SCREENSHOTS){await page.screenshot({path:path.join(process.env.RPGM_SCREENSHOTS,'settings-en-'+width+'.png')});}
+   await page.locator('[data-setting="hotkey"]').selectOption('F7');await page.locator('[data-setting="showButton"]').uncheck();await page.evaluate(()=>RPGMToolkit.close());
+   await page.reload();await page.waitForFunction(()=>window._ticks>2);assert(await page.locator('.rt-launch').isHidden());await page.keyboard.press('F7');assert(await page.evaluate(()=>RPGMToolkit.isOpen()));
+   await page.locator('[data-action="tool-settings"]').click();assert.equal(await page.locator('[data-setting="hotkey"]').inputValue(),'F7');await page.locator('[data-setting="showButton"]').check();
+   await page.getByRole('button',{name:'Back to previous menu'}).click();await page.locator('[data-action="tool-editors"]').click();assert.equal(await page.locator('.rt-row').count(),40);assert.equal(await page.locator('[data-action="tool-quick"]').count(),0);
+   const listRail=page.locator('.rt-main > .rt-scrollbar');await listRail.focus();await page.keyboard.press('End');assert(await page.locator('.rt-list').evaluate(e=>Math.abs(e.scrollTop-(e.scrollHeight-e.clientHeight))<2));
+   await page.keyboard.press('Home');const thumb=await listRail.locator('.rt-scroll-thumb').boundingBox();
+   await page.mouse.move(thumb.x+thumb.width/2,thumb.y+thumb.height/2);await page.mouse.down();await page.mouse.move(thumb.x+thumb.width/2,thumb.y+thumb.height/2+70,{steps:6});await page.mouse.up();assert(await page.locator('.rt-list').evaluate(e=>e.scrollTop>20));
+   await page.locator('.rt-list').evaluate(e=>e.scrollTop=0);await page.waitForTimeout(30);const touchThumb=await listRail.locator('.rt-scroll-thumb').boundingBox(),touchCdp=await page.context().newCDPSession(page),tx=Math.round(touchThumb.x+touchThumb.width/2),ty=Math.round(touchThumb.y+touchThumb.height/2);
+   await touchCdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:tx,y:ty}]});await touchCdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:tx,y:ty+60}]});await touchCdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await touchCdp.detach();assert(await page.locator('.rt-list').evaluate(e=>e.scrollTop>20));
+
+   await page.evaluate(()=>{RPGMToolkit.close();Scene_Battle=function(){};Scene_Battle.prototype.isBusy=()=>false;SceneManager._scene=new Scene_Battle();$gameParty.inBattle=()=>true;window.testEnemy={hp:2500,mhp:4000,mp:50,mmp:100,tp:0,name:()=> 'Slime',maxTp:()=>100,setHp(v){this.hp=v;},setMp(v){this.mp=v;},setTp(v){this.tp=v;}};$gameTroop={members:()=>[testEnemy]};RPGMToolkit.open();});
+   await page.locator('[data-action="tool-resources"]').click();await page.locator('#rt-tool-actor').selectOption('enemy:0');
+   await page.locator('[data-param="hp"][data-adjust="subtract"]').click();assert.equal(await page.evaluate(()=>testEnemy.hp),1500);
+   await page.locator('[data-param="hp"][data-adjust="add"]').click();assert.equal(await page.evaluate(()=>testEnemy.hp),2500);
+   await page.locator('[data-param="hp"][data-adjust="zero"]').click();assert.equal(await page.evaluate(()=>testEnemy.hp),0);
+   await page.getByRole('button',{name:'Back to previous menu'}).click();await page.locator('[data-action="tool-stats"]').click();await page.locator('#rt-tool-param').selectOption('2');await page.locator('[data-param="stat"][data-adjust="zero"]').click();assert.equal(await page.evaluate(()=>$gameActors.actor(1)._paramPlus[2]),0);
+   await page.addScriptTag({path:require.resolve('axe-core/axe.min.js')});assert.deepEqual(await page.evaluate(async()=>(await axe.run(document,{runOnly:{type:'tag',values:['wcag2a','wcag2aa']}})).violations.map(v=>v.id)),[]);
    assert.deepEqual(errors,[]);await page.close();
   }
  }finally{await browser.close();await new Promise(r=>server.close(r));}

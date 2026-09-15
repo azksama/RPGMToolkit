@@ -1,4 +1,3 @@
-/* Global navigation and separate tool pages. Engine logic lives in tools.js. */
 var toolboxHome = true, toolboxMapToken = 0, toolboxMap = null;
 function fitToolboxModal() {
     if (!root || !opened || !modalMode) return;
@@ -22,6 +21,7 @@ function installToolboxUI() {
     root.addEventListener('change', function(event) {
         guarded(function() {
             if (event.target.id === 'rt-tool-actor' || event.target.id === 'rt-tool-param') updateToolValues();
+            if (event.target.id === 'rt-tool-toggle') { var mode=event.target.getAttribute('data-mode'); try { if (mode === 'god') gameTools.setGod(event.target.checked); else gameTools.setNoclip(event.target.checked); } finally { event.target.checked=gameTools.state()[mode]; } }
             if (event.target.id === 'rt-tool-map') loadToolMap();
         });
     });
@@ -38,46 +38,53 @@ function showToolboxHome() {
         ['translations','Traductions','Noms anglais · tout traduire et reprendre'],
         ['god','Godmode',state.god ? 'Activé · équipe protégée' : 'HP au maximum · protection contre K.O.'],
         ['noclip','No Clip',state.noclip ? 'Activé · obstacles traversables' : 'Traverser les obstacles de la carte'],
-        ['resources','HP / MP','PV, PM et TP · acteur ou équipe'],
+        ['resources','HP / MP','Alliés et ennemis'],
         ['stats','Stats','Niveau, expérience et bonus permanents'],
         ['teleport','Téléportation','Choisir une carte et une position'],
         ['party','Partie','Argent et sauvegarde'],
-        ['history','Historique','Annuler ou rétablir une modification']
+        ['history','Historique','Annuler ou rétablir une modification'],
+        ['settings','Paramètres','Langue, affichage et raccourcis']
     ];
     $('.rt-home-content').innerHTML = entries.map(function(e) { return '<button type="button" data-action="tool-'+e[0]+'"><strong>'+e[1]+'</strong><span>'+e[2]+'</span><b aria-hidden="true">›</b></button>'; }).join('');
     $('.rt-panel').focus();
 }
 function toolActorSelector(all) {
-    return '<label class="rt-field"><span>Acteur</span><select id="rt-tool-actor">' + (all ? '<option value="all">Toute l’équipe</option>' : '') + gameTools.members().map(function(a) { return '<option value="'+a.actorId()+'">'+esc(a.name())+'</option>'; }).join('') + '</select></label>';
+    var options = (all ? '<option value="all">Toute l’équipe</option>' : '') + gameTools.members().map(function(a) { return '<option value="'+a.actorId()+'">'+esc(a.name())+'</option>'; }).join('');
+    if (all && gameTools.enemies().length) options += '<optgroup label="Ennemis"><option value="enemies">Tous les ennemis</option>'+gameTools.enemies().map(function(a,i){return '<option value="enemy:'+i+'">'+(i+1)+' · '+esc(a.name())+'</option>';}).join('')+'</optgroup>';
+    return '<label class="rt-field"><span>Cible</span><select id="rt-tool-actor">'+options+'</select></label>';
+}
+function quickActions(param) {
+    return '<div class="rt-actions rt-stat-quick">'+[['zero','0'],['add','+1000'],['subtract','−1000']].map(function(a){return '<button type="button" data-action="tool-quick" data-param="'+param+'" data-adjust="'+a[0]+'">'+a[1]+'</button>';}).join('')+'</div>';
 }
 function toolPage(mode) {
     var titles = {god:'Godmode',noclip:'No Clip',resources:'HP / MP',stats:'Stats',teleport:'Téléportation'};
     openModal(mode,titles[mode]); var html = '';
     if (mode === 'god' || mode === 'noclip') {
         var active = gameTools.state()[mode];
-        html = '<p>' + (mode === 'god' ? 'Maintient les HP de l’équipe au maximum et bloque l’état K.O. Les ennemis restent inchangés.' : 'Traverse les obstacles de la carte. Les bords de carte et les règles spéciales des autres plugins restent applicables.') + '</p><p class="rt-note">Mode de session : reste actif après fermeture du panneau, puis se désactive au chargement d’une partie.</p><button type="button" class="rt-primary" data-action="tool-toggle-'+mode+'" aria-pressed="'+active+'">'+(active ? 'Désactiver' : 'Activer')+'</button>';
+        html = '<label class="rt-toggle"><span>'+titles[mode]+'</span><input type="checkbox" role="switch" id="rt-tool-toggle" data-mode="'+mode+'"'+(active?' checked':'')+'><span class="rt-toggle-track" aria-hidden="true"></span></label>';
+
     }
-    if (mode === 'resources') html = '<form data-form="tool-resources">'+toolActorSelector(true)+'<p id="rt-tool-summary" class="rt-muted"></p>'+field('HP · points de vie','rt-tool-hp',0,'number','min="0" step="1" required')+field('MP · points de magie','rt-tool-mp',0,'number','min="0" step="1" required')+field('TP','rt-tool-tp',0,'number','min="0" step="1" required')+'<div class="rt-actions"><button type="submit" class="rt-primary">Appliquer</button>'+button('Tout restaurer','tool-heal')+'</div></form>';
-    if (mode === 'stats') html = '<form data-form="tool-stats">'+toolActorSelector(false)+'<label class="rt-field"><span>Statistique</span><select id="rt-tool-param"><option value="level">Niveau</option><option value="exp">Expérience totale</option>'+['HP max','MP max','Attaque','Défense','Attaque magique','Défense magique','Agilité','Chance'].map(function(n,i){return '<option value="'+i+'">Bonus · '+n+'</option>';}).join('')+'</select></label><p id="rt-tool-summary" class="rt-muted"></p>'+field('Nouvelle valeur','rt-tool-value',0,'number','step="1" required')+'<button type="submit" class="rt-primary">Appliquer</button><p class="rt-note">Les bonus s’ajoutent aux statistiques de base et d’équipement. Les changements sont conservés avec la sauvegarde du jeu.</p></form>';
-    if (mode === 'teleport') html = '<form data-form="tool-teleport">'+field('Rechercher une carte · nom ou ID','rt-map-query','','search','autocomplete="off"')+'<label class="rt-field"><span>Carte</span><select id="rt-tool-map"></select></label><p id="rt-map-summary" role="status"></p><div class="rt-coordinate-fields">'+field('X','rt-map-x',0,'number','min="0" step="1" required')+field('Y','rt-map-y',0,'number','min="0" step="1" required')+'</div><label class="rt-field"><span>Direction</span><select id="rt-map-direction"><option value="0">Conserver</option><option value="2">Bas</option><option value="4">Gauche</option><option value="6">Droite</option><option value="8">Haut</option></select></label><button id="rt-map-go" type="submit" class="rt-primary" disabled>Se téléporter</button><p class="rt-note">Coordonnées en cases, à partir de 0. Choisissez une case praticable. Le panneau se ferme pour effectuer le transfert.</p></form>';
+    if (mode === 'resources') html = '<form data-form="tool-resources">'+toolActorSelector(true)+'<p id="rt-tool-summary" class="rt-muted"></p>'+field('HP','rt-tool-hp',0,'number','min="0" step="1" required')+quickActions('hp')+field('MP','rt-tool-mp',0,'number','min="0" step="1" required')+quickActions('mp')+field('TP','rt-tool-tp',0,'number','min="0" step="1" required')+'<div class="rt-actions"><button type="submit" class="rt-primary">Appliquer</button>'+button('Tout restaurer','tool-heal')+'</div></form>';
+    if (mode === 'stats') html = '<form data-form="tool-stats">'+toolActorSelector(false)+'<label class="rt-field"><span>Statistique</span><select id="rt-tool-param"><option value="level">Niveau</option><option value="exp">Expérience totale</option>'+['HP max','MP max','Attaque','Défense','Attaque magique','Défense magique','Agilité','Chance'].map(function(n,i){return '<option value="'+i+'">Bonus · '+n+'</option>';}).join('')+'</select></label><p id="rt-tool-summary" class="rt-muted"></p>'+field('Valeur','rt-tool-value',0,'number','step="1" required')+quickActions('stat')+'<button type="submit" class="rt-primary">Appliquer</button></form>';
+    if (mode === 'teleport') html = '<form data-form="tool-teleport">'+field('Rechercher une carte · nom ou ID','rt-map-query','','search','autocomplete="off"')+'<label class="rt-field"><span>Carte</span><select id="rt-tool-map"></select></label><p id="rt-map-summary" role="status"></p><div class="rt-coordinate-fields">'+field('X','rt-map-x',0,'number','min="0" step="1" required')+field('Y','rt-map-y',0,'number','min="0" step="1" required')+'</div><label class="rt-field"><span>Direction</span><select id="rt-map-direction"><option value="0">Conserver</option><option value="2">Bas</option><option value="4">Gauche</option><option value="6">Droite</option><option value="8">Haut</option></select></label><button id="rt-map-go" type="submit" class="rt-primary" disabled>Se téléporter</button></form>';
     $('.rt-modal-content').innerHTML = html;
     if (mode === 'resources' || mode === 'stats') updateToolValues();
     if (mode === 'teleport') { renderToolMaps(''); $('#rt-tool-map').value = String(g.$gameMap.mapId()); if (!$('#rt-tool-map').value) $('#rt-tool-map').selectedIndex = 0; loadToolMap(); }
 }
 function updateToolValues() {
-    var id = $('#rt-tool-actor').value, actors = gameTools.members().filter(function(a){return id === 'all' || String(a.actorId()) === id;}), a = actors[0];
+    var id = $('#rt-tool-actor').value, actors = modalMode === 'resources' ? gameTools.resourceTargets(id) : gameTools.members().filter(function(a){return String(a.actorId()) === id;}), a = actors[0];
     if (!a) { $('#rt-tool-summary').textContent = 'Aucun acteur dans l’équipe.'; return; }
     if (modalMode === 'resources') {
         var maxHp = Math.min.apply(null,actors.map(function(a){return a.mhp;})), maxMp = Math.min.apply(null,actors.map(function(a){return a.mmp;})), maxTp = Math.min.apply(null,actors.map(function(a){return a.maxTp();}));
         $('#rt-tool-hp').max = maxHp; $('#rt-tool-mp').max = maxMp; $('#rt-tool-tp').max = maxTp;
         $('#rt-tool-hp').value = Math.min(a.hp,maxHp); $('#rt-tool-mp').value = Math.min(a.mp,maxMp); $('#rt-tool-tp').value = Math.min(a.tp,maxTp);
-        $('#rt-tool-summary').textContent = id === 'all' ? 'Valeurs communes à toute l’équipe. « Tout restaurer » utilise les maxima propres à chaque acteur.' : a.name()+' · HP '+a.hp+'/'+a.mhp+' · MP '+a.mp+'/'+a.mmp;
+        $('#rt-tool-summary').textContent = actors.length > 1 ? actors.length+' cibles' : 'HP '+a.hp+'/'+a.mhp+' · MP '+a.mp+'/'+a.mmp;
     } else {
         var param = $('#rt-tool-param').value;
         $('#rt-tool-value').min = param === 'level' ? 1 : param === 'exp' ? 0 : -999999;
         $('#rt-tool-value').max = param === 'level' ? a.maxLevel() : param === 'exp' ? 999999999 : 999999;
         $('#rt-tool-value').value = param === 'level' ? a.level : param === 'exp' ? a.currentExp() : a._paramPlus[Number(param)] || 0;
-        $('#rt-tool-summary').textContent = param === 'level' || param === 'exp' ? 'Progression de '+a.name() : 'Statistique effective : '+a.param(Number(param))+' · modifier ici le bonus permanent.';
+        $('#rt-tool-summary').textContent = param === 'level' || param === 'exp' ? '' : 'Total : '+a.param(Number(param));
     }
 }
 function renderToolMaps(query) { $('#rt-tool-map').innerHTML = gameTools.maps(query).map(function(m){return '<option value="'+m.id+'">#'+m.id+' · '+esc(m.name)+'</option>';}).join(''); }
@@ -95,16 +102,17 @@ function loadToolMap() {
         $('#rt-map-go').disabled = false;
     }).catch(function(e){if (opened && modalMode === 'teleport' && token === toolboxMapToken) say(e.message,true);});
 }
-function toolboxAction(action) {
+function toolboxAction(action, node) {
     if (action.indexOf('tool-') !== 0) return false;
     var mode = action.slice(5);
     if (mode === 'close') closeToolkit();
     else if (mode === 'home') showToolboxHome();
     else if (mode === 'editors') { toolboxHome = false; root.classList.remove('rt-home-open'); render(); $('.rt-panel').focus(); }
+    else if (mode === 'settings') renderSettings();
+    else if (mode === 'quick') { var param=node.getAttribute('data-param'), adjust=node.getAttribute('data-adjust'), target=$('#rt-tool-actor').value; if (param === 'stat') gameTools.adjustStat(target,$('#rt-tool-param').value,adjust); else gameTools.adjustResource(target,param,adjust); dirty=true; updateToolValues(); }
     else if (mode === 'translations') { translationScope = 'all'; pendingTranslations = []; openModal('translations','Traductions'); renderTranslations(); }
     else if (mode === 'party') { openModal('party','Partie'); renderParty(); }
     else if (mode === 'history') { openModal('history','Historique'); renderHistory(); }
-    else if (mode === 'toggle-god' || mode === 'toggle-noclip') { var key=mode.slice(7); if(key==='god')gameTools.setGod(!gameTools.state().god);else gameTools.setNoclip(!gameTools.state().noclip); toolPage(key); }
     else if (mode === 'heal') { gameTools.resources($('#rt-tool-actor').value,0,0,0,true); dirty=true;updateToolValues();say('HP, MP et TP restaurés.'); }
     else toolPage(mode);
     return true;

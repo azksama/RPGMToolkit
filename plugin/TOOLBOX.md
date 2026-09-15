@@ -1,6 +1,6 @@
-# Toolbox 1.3.0
+# Toolbox 1.4.0
 
-Sur une carte chargée, **Toolbox** (en haut à gauche) ou F6 ouvre le menu global. Chaque bouton ouvre un sous-menu. **‹** revient au menu précédent, **✕** ferme le panneau et reprend le jeu.
+Sur une carte ou un combat chargé, **Toolbox** (en haut à gauche) ou F6 ouvre le menu global. Chaque bouton ouvre un sous-menu. **‹** revient au menu précédent, **✕** ferme le panneau et reprend le jeu.
 
 - **Éditeurs** : variables, interrupteurs, objets, armes, armures, acteurs, compétences et états. Recherche, actions rapides, favoris, gel et édition groupée. Les icônes sont celles de l’IconSet du jeu.
 - **Traductions** : sélectionner la page/sélection, toute la catégorie ou **Tout le jeu**, puis lancer la traduction. Cette dernière option couvre tous les noms chargés du catalogue ; les interrupteurs locaux concernent la carte actuelle.
@@ -25,8 +25,16 @@ MyMemory n’est pas obligatoire pour les dictionnaires : **Exporter les noms à
 
 ## Mise à jour
 
-Fermez le jeu, installez l’APK 1.3.0, puis **Mod inclus → jeu → Réinstaller / mettre à jour**. Mettre à jour l’application seule ne remplace pas le plugin déjà installé dans le jeu. Alternative : remplacer `js/plugins/RPGMToolkit.js` (ou `www/js/plugins/RPGMToolkit.js`) par le fichier de la nouvelle archive du mod.
+Fermez le jeu, installez l’APK 1.4.0, puis **Mod inclus → jeu → Réinstaller / mettre à jour**. Mettre à jour l’application seule ne remplace pas le plugin déjà installé dans le jeu. Alternative : remplacer `js/plugins/RPGMToolkit.js` (ou `www/js/plugins/RPGMToolkit.js`) par le fichier de la nouvelle archive du mod.
 
 ## Validation
 
 Les tests couvrent les comportements MV avec les classes officielles, le cycle de chargement MV/MZ, la file de traduction avec réseau simulé, la conservation des alias après rechargement et les formats mobiles. Le défilement est testé avec un gestionnaire moteur qui annule les gestes tactiles, ainsi qu’avec des glissements souris. Les commandes et icônes de la démo sont simulées. Cela ne remplace pas un essai dans le jeu réel de l’utilisateur sur JoiPlay.
+
+## Paramètres et combat
+
+Paramètres conserve par jeu la langue de l’interface (français/anglais), la taille du texte, la largeur des barres (18/24/32 px), la pagination, le raccourci et la visibilité du bouton Toolbox. Les barres se déplacent au doigt ou à la souris ; clavier : flèches, Page précédente/suivante, Début/Fin.
+
+En combat, HP/MP propose les ennemis du groupe actuel. Les actions rapides 0, +1000 et −1000 modifient immédiatement le paramètre sélectionné, avec bornes du moteur. Le niveau minimum reste 1. Les bonus de statistiques peuvent être négatifs. Godmode continue de protéger uniquement l’équipe. Téléportation et sauvegarde restent indisponibles pendant un combat.
+
+Dans Traductions, Supprimer efface le dictionnaire local de ce jeu et arrête la traduction en cours. Les favoris, paramètres et fichiers JSON exportés restent conservés.

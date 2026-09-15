@@ -59,6 +59,29 @@ function createToolkitTools(g) {
         sync();
         if (god) members().forEach(function(a) { if (a.hp < a.mhp || a.isStateAffected(a.deathStateId())) { a.setHp(a.mhp); a.removeState(a.deathStateId()); } });
     }
+    function enemies() { return g.$gameParty.inBattle() && g.$gameTroop ? g.$gameTroop.members() : []; }
+    function resourceTargets(id) {
+        sync();
+        if (String(id).indexOf('enemy:') !== 0 && id !== 'enemies') return targets(id);
+        var list = enemies();
+        if (!list.length) throw new Error('Aucun ennemi en combat.');
+        if (id === 'enemies') return list;
+        var index = integer(String(id).slice(6), 0, list.length - 1);
+        return [list[index]];
+    }
+    function ensureResources() {
+        sync();
+        if (g.$gamePlayer.isTransferring() || g.$gameMessage.isBusy() || (!g.$gameParty.inBattle() && g.$gameMap.isEventRunning())) throw new Error('Action indisponible.');
+    }
+    function adjustResource(id, param, action) {
+        ensureResources();
+        if (['hp','mp','tp'].indexOf(param) < 0 || ['zero','add','subtract'].indexOf(action) < 0) throw new Error('Action invalide.');
+        resourceTargets(id).forEach(function(a) {
+            var max = param === 'hp' ? a.mhp : param === 'mp' ? a.mmp : a.maxTp();
+            var next = action === 'zero' ? 0 : a[param] + (action === 'add' ? 1000 : -1000);
+            a[param === 'hp' ? 'setHp' : param === 'mp' ? 'setMp' : 'setTp'](Math.max(0,Math.min(max,next)));
+        });
+    }
     function targets(id) {
         var list = members();
         if (String(id) === 'all') return list;
@@ -68,18 +91,27 @@ function createToolkitTools(g) {
         return list;
     }
     function resources(id, hp, mp, tp, full) {
-        ensureMap();
-        var list = targets(id);
+        ensureResources();
+        var list = resourceTargets(id);
         list.forEach(function(a) { if (!full) { integer(hp, 0, a.mhp); integer(mp, 0, a.mmp); integer(tp, 0, a.maxTp()); } });
         list.forEach(function(a) { a.setHp(full ? a.mhp : Number(hp)); a.setMp(full ? a.mmp : Number(mp)); a.setTp(full ? a.maxTp() : Number(tp)); });
         return list.length;
     }
     function stat(id, param, next) {
-        ensureMap(); var a = targets(id)[0];
+        ensureResources(); var a = targets(id)[0];
         if (param === 'level') a.changeLevel(integer(next, 1, a.maxLevel()), false);
         else if (param === 'exp') a.changeExp(integer(next, 0, 999999999), false);
         else { param = integer(param, 0, 7); next = integer(next, -999999, 999999); a.addParam(param, next - (a._paramPlus[param] || 0)); }
         return a;
+    }
+    function adjustStat(id, param, action) {
+        if (['zero','add','subtract'].indexOf(action) < 0) throw new Error('Action invalide.');
+        var a = targets(id)[0], current, min, max;
+        if (param === 'level') { current = a.level; min = 1; max = a.maxLevel(); }
+        else if (param === 'exp') { current = a.currentExp(); min = 0; max = 999999999; }
+        else { param = integer(param,0,7); current = a._paramPlus[param] || 0; min = -999999; max = 999999; }
+        var next = action === 'zero' ? 0 : current + (action === 'add' ? 1000 : -1000);
+        return stat(id,param,Math.max(min,Math.min(max,next)));
     }
     function maps(query) {
         query = String(query || '').toLowerCase();
@@ -110,6 +142,6 @@ function createToolkitTools(g) {
         if ([0,2,4,6,8].indexOf(direction) < 0) throw new Error('Direction invalide.');
         g.$gamePlayer.reserveTransfer(map.id,x,y,direction,0);
     }
-    return { sync:sync, tick:tick, setGod:setGod, setNoclip:setNoclip, members:members, resources:resources, stat:stat, maps:maps, loadMap:loadMap, teleport:teleport,
+    return { sync:sync, tick:tick, setGod:setGod, setNoclip:setNoclip, members:members, enemies:enemies, resourceTargets:resourceTargets, resources:resources, adjustResource:adjustResource, stat:stat, adjustStat:adjustStat, maps:maps, loadMap:loadMap, teleport:teleport,
         state:function() { sync(); return { god:god, noclip:noclip }; } };
 }

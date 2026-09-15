@@ -115,3 +115,25 @@
 .rt .rt-coordinate-fields { display:flex; gap:8px; }
 .rt .rt-coordinate-fields > label { flex:1; min-width:0; }
 .rt-launch { right:auto; left:12px; left:max(12px,env(safe-area-inset-left,0px)); top:max(12px,env(safe-area-inset-top,0px)); }
+.rt { --rt-scrollbar-width:24px; --rt-font-size:13px; font-size:var(--rt-font-size); }
+.rt .rt-select { font-size:var(--rt-font-size); }
+.rt .rt-list,.rt .rt-home-content,.rt .rt-modal-content { padding-right:calc(var(--rt-scrollbar-width) + 8px); scrollbar-width:none; }
+.rt .rt-list::-webkit-scrollbar,.rt .rt-home-content::-webkit-scrollbar,.rt .rt-modal-content::-webkit-scrollbar { display:none; }
+.rt textarea::-webkit-scrollbar { width:18px; height:18px; }
+.rt textarea::-webkit-scrollbar-track { background:#181d25; }
+.rt textarea::-webkit-scrollbar-thumb { background:#9eb3ce; border:3px solid #181d25; border-radius:8px; }
+.rt .rt-scrollbar { position:fixed; z-index:4; background:#11161e; border-left:1px solid #64748b; touch-action:none; user-select:none; cursor:pointer; }
+.rt .rt-scroll-thumb { width:100%; min-height:24px; border:4px solid #11161e; border-radius:9px; background:#9eb3ce; cursor:grab; }
+.rt .rt-scrollbar[aria-disabled=true] .rt-scroll-thumb { background:#394353; }
+.rt .rt-scrollbar:focus-visible { outline:2px solid #bdd8ff; outline-offset:-2px; }
+.rt .rt-toggle { display:flex; align-items:center; gap:12px; min-height:40px; cursor:pointer; position:relative; }
+.rt .rt-toggle > span:first-child { flex:1; }
+.rt .rt-toggle input { position:absolute; right:0; width:48px; height:30px; opacity:0; margin:0; z-index:1; cursor:pointer; }
+.rt .rt-toggle-track { display:block; width:48px; height:28px; flex:none; border-radius:20px; background:#495363; border:1px solid #7a879c; padding:3px; }
+.rt .rt-toggle-track::after { content:''; display:block; width:20px; height:20px; border-radius:50%; background:#f0f3f9; }
+.rt .rt-toggle input:checked + .rt-toggle-track { background:#4272ac; border-color:#a0c5f4; }
+.rt .rt-toggle input:checked + .rt-toggle-track::after { transform:translateX(19px); }
+.rt .rt-toggle input:focus-visible + .rt-toggle-track { outline:2px solid #bdd8ff; outline-offset:3px; }
+.rt .rt-stat-quick { margin:-5px 0 14px; }
+.rt .rt-stat-quick button { flex:1; }
+.rt .rt-import { margin-top:12px; }

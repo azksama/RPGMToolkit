@@ -136,3 +136,14 @@ test('translation groups persist together and reload without modifying game data
  assert.throws(()=>r.setAliases([records[0],{kind:'variables',id:999}],'Invalid'));assert.equal(writes,1);
  storage.setItem=()=>{throw Error('Quota');};r.setAliases(records,'Memory only');assert(r.storageWarning());assert.equal(r.alias(records[0]),'Memory only');assert.equal(disk.size,1);
 });
+
+test('clearing translations preserves settings and favorites after restart',()=>{
+ const {g,r,storage}=fixture(),v=r.list('variables')[0];r.prefs.favorites[v.key]=true;r.prefs.settings.language='en';r.setAlias(v,'Progress');
+ assert(r.clearAliases());assert.equal(r.alias(v),'');
+ const restored=g.createToolkitRuntime(g,storage);assert.equal(restored.alias(restored.list('variables')[0]),'');assert(restored.prefs.favorites[v.key]);assert.equal(restored.prefs.settings.language,'en');
+});
+test('settings validate stored choices',()=>{
+ const {g,r,storage}=fixture();r.prefs.settings={language:'xx',fontSize:999,scrollbarWidth:-2,pageSize:10000,hotkey:'Delete',showButton:false};r.savePrefs();
+ const settings=g.createToolkitRuntime(g,storage).prefs.settings;
+ assert.equal(settings.language,'fr');assert.equal(settings.fontSize,13);assert.equal(settings.scrollbarWidth,24);assert.equal(settings.pageSize,0);assert.equal(settings.hotkey,'');assert.equal(settings.showButton,false);
+});
