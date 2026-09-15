@@ -4,7 +4,7 @@ function createToolkitRuntime(g, storage) {
     var kinds = ['variables', 'switches', 'items', 'weapons', 'armors', 'actors', 'skills', 'states', 'selfSwitches'];
     var cache = {}, history = [], redo = [], log = [], baseline = {}, session = null;
     var prefs = { english: true, source: 'ja', favorites: {}, aliases: {} };
-    var storageWarning = false;
+    var storageWarning = false, frozen = {}, hooks = [], writing = false;
     function own(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
     function normal(value) {
         var text = String(value == null ? '' : value).toLowerCase();
@@ -30,7 +30,7 @@ function createToolkitRuntime(g, storage) {
         Object.keys(saved.aliases || {}).slice(0, 50000).forEach(function(k) { if (/^[a-zA-Z]+:[0-9]+(?:\.[0-9]+\.[A-D])?$/.test(k) && validAlias(saved.aliases[k])) prefs.aliases[k] = saved.aliases[k]; });
     } catch (e) { storageWarning = true; }
     function ensureSession() {
-        if (session !== g.$gameVariables) { session = g.$gameVariables; history = []; redo = []; log = []; baseline = {}; cache = {}; }
+        if (session !== g.$gameVariables) { removeHooks(); frozen = {}; session = g.$gameVariables; history = []; redo = []; log = []; baseline = {}; cache = {}; }
     }
     function db(kind) {
         return { items: g.$dataItems, weapons: g.$dataWeapons, armors: g.$dataArmors, actors: g.$dataActors, skills: g.$dataSkills, states: g.$dataStates }[kind];
@@ -72,7 +72,7 @@ function createToolkitRuntime(g, storage) {
     function alias(r) { var a = prefs.aliases[r.key]; return a && a.original === r.original ? a.english : ''; }
     function title(r) { return (prefs.english && alias(r)) || r.original || '(sans nom)'; }
     function value(r) {
-        if (r.kind === 'variables') return g.$gameVariables.value(r.id);
+        if (r.kind === 'variables') { var raw = g.$gameVariables._data && g.$gameVariables._data[r.id]; return typeof raw === 'boolean' ? raw : g.$gameVariables.value(r.id); }
         if (r.kind === 'switches') return g.$gameSwitches.value(r.id);
         if (r.kind === 'selfSwitches') return g.$gameSelfSwitches.value(r.data);
         if (/^(items|weapons|armors)$/.test(r.kind)) return g.$gameParty.numItems(r.data);
@@ -93,6 +93,10 @@ function createToolkitRuntime(g, storage) {
     function search(kind, query, filter) {
         var tokens = normal(query).trim().split(/\s+/).filter(Boolean);
         return list(kind).filter(function(r) {
+            if (filter === 'int' && (typeof value(r) !== 'number' || !isFinite(value(r)) || Math.floor(value(r)) !== value(r))) return false;
+            if (filter === 'bool' && typeof value(r) !== 'boolean') return false;
+            if (filter === 'text' && typeof value(r) !== 'string') return false;
+            if (filter === 'frozen' && !frozen[r.key]) return false;
             if (filter === 'favorites' && !prefs.favorites[r.key]) return false;
             if (filter === 'named' && !r.original.trim()) return false;
             if (filter === 'active' && !value(r)) return false;
@@ -134,26 +138,104 @@ function createToolkitRuntime(g, storage) {
     function assertRecord(r) {
         if (!r || list(r.kind).indexOf(r) < 0) throw new Error('Entrée périmée. Actualisez la liste.');
     }
-    function setValue(r, next) {
+    function editable(r) { return /^(variables|switches|selfSwitches|items|weapons|armors)$/.test(r.kind) && /^(number|string|boolean)$/.test(typeof value(r)); }
+    function validateValue(r, next) {
         assertRecord(r);
-        var v = value(r);
+        if (!editable(r)) throw new Error('Cette entrée est en consultation : utilisez ses commandes spécifiques.');
         if (r.kind === 'variables') {
-            if (typeof v !== 'number' && typeof v !== 'string') throw new Error('Cette variable contient un type complexe : consultation uniquement.');
-            if (typeof next === 'number') next = integer(next, -9007199254740991, 9007199254740991);
-            else if (typeof next !== 'string' || next.length > 10000) throw new Error('Texte invalide (10 000 caractères maximum).');
-            return commit(title(r), function() { return value(r); }, function(x) { g.$gameVariables.setValue(r.id, x); }, next);
+            if (typeof next === 'number') return integer(next, -9007199254740991, 9007199254740991);
+            if (typeof next === 'boolean') return next;
+            if (typeof next === 'string' && next.length <= 10000) return next;
+            throw new Error('Nombre entier, booléen ou texte de 10 000 caractères maximum attendu.');
         }
         if (r.kind === 'switches' || r.kind === 'selfSwitches') {
-            if (typeof next !== 'boolean') throw new Error('ON ou OFF attendu.');
-            return commit(title(r), function() { return value(r); }, function(x) {
-                if (r.kind === 'switches') g.$gameSwitches.setValue(r.id, x); else g.$gameSelfSwitches.setValue(r.data, x);
-            }, next);
+            if (typeof next !== 'boolean') throw new Error('true ou false attendu pour tous les interrupteurs sélectionnés.');
+            return next;
         }
-        if (/^(items|weapons|armors)$/.test(r.kind)) {
-            next = integer(next, 0, g.$gameParty.maxItems(r.data));
-            return commit(title(r), function() { return value(r); }, function(x) { g.$gameParty.gainItem(r.data, x - value(r), false); }, next);
+        return integer(next, 0, g.$gameParty.maxItems(r.data));
+    }
+    function writeValue(r, next) {
+        var previous = writing; writing = true;
+        try {
+            if (r.kind === 'variables') g.$gameVariables.setValue(r.id, next);
+            else if (r.kind === 'switches') g.$gameSwitches.setValue(r.id, next);
+            else if (r.kind === 'selfSwitches') g.$gameSelfSwitches.setValue(r.data, next);
+            else g.$gameParty.gainItem(r.data, next - value(r), false);
+            if (frozen[r.key]) frozen[r.key].value = value(r);
+        } finally { writing = previous; }
+    }
+    function setValue(r, next) {
+        next = validateValue(r, next);
+        return commit(title(r), function() { return value(r); }, function(x) { writeValue(r, x); }, next);
+    }
+    function uniqueRecords(records) {
+        ensureSession();
+        if (!records.length || records.length > 500) throw new Error('Sélectionnez entre 1 et 500 entrées.');
+        var seen = {};
+        return records.filter(function(r) { assertRecord(r); if (seen[r.key]) return false; seen[r.key] = true; return true; });
+    }
+    function setMany(records, next) {
+        records = uniqueRecords(records);
+        var target = records.map(function(r) { return validateValue(r, next); });
+        function read() { return JSON.stringify(records.map(value)); }
+        function write(payload) {
+            var values = JSON.parse(payload), before = records.map(value), applied = 0;
+            records.forEach(function(r, i) { validateValue(r, values[i]); });
+            try {
+                records.forEach(function(r, i) { applied = i + 1; writeValue(r, values[i]); if (value(r) !== values[i]) throw new Error('Le moteur a refusé une valeur du groupe.'); });
+            } catch (e) {
+                var failed = false;
+                records.slice(0, applied).forEach(function(r, i) { try { writeValue(r, before[i]); if (value(r) !== before[i]) failed = true; } catch (_) { failed = true; } });
+                if (failed) { history = []; redo = []; throw new Error('Restauration incomplète : contrôlez les valeurs du groupe avant de sauvegarder.'); }
+                throw e;
+            }
         }
-        throw new Error('Utilisez les commandes de cette catégorie.');
+        commit(records.length + ' entrées', read, write, JSON.stringify(target));
+        return records.length;
+    }
+    function removeHooks() {
+        hooks.forEach(function(h) { if (h.object[h.name] === h.wrapper) { if (h.own) h.object[h.name] = h.original; else delete h.object[h.name]; } });
+        hooks = [];
+    }
+    function hook(object, name, key) {
+        if (!object || typeof object[name] !== 'function') return;
+        var original = object[name], hadOwn = own(object, name);
+        var wrapper = function() { var lock = frozen[key.apply(null, arguments)]; if (!writing && lock) return; return original.apply(this, arguments); };
+        // Non-enumerable: temporary guards must not be serialized in a save file.
+        Object.defineProperty(object, name, { value: wrapper, configurable: true, writable: true, enumerable: false });
+        hooks.push({ object: object, name: name, original: original, wrapper: wrapper, own: hadOwn });
+    }
+    function installHooks() {
+        if (hooks.length) return;
+        hook(g.$gameVariables, 'setValue', function(id) { return 'variables:' + id; });
+        hook(g.$gameSwitches, 'setValue', function(id) { return 'switches:' + id; });
+        hook(g.$gameSelfSwitches, 'setValue', function(key) { return 'selfSwitches:' + key.join('.'); });
+        hook(g.$gameParty, 'gainItem', function(item) {
+            if (!item) return '';
+            var kind = g.$dataItems[item.id] === item ? 'items' : g.$dataWeapons[item.id] === item ? 'weapons' : 'armors';
+            return kind + ':' + item.id;
+        });
+    }
+    function freezeMany(records, active) {
+        records = uniqueRecords(records);
+        if (active) records.forEach(function(r) { validateValue(r, value(r)); });
+        var added = records.filter(function(r) { return !frozen[r.key]; }).length;
+        if (active && Object.keys(frozen).length + added > 500) throw new Error('Maximum : 500 valeurs figées simultanément.');
+        records.forEach(function(r) { if (active) frozen[r.key] = { record:r, value:value(r) }; else delete frozen[r.key]; });
+        if (Object.keys(frozen).length) installHooks(); else removeHooks();
+        return records.length;
+    }
+    function enforceFrozen() {
+        ensureSession();
+        Object.keys(frozen).forEach(function(key) {
+            var lock = frozen[key];
+            if (value(lock.record) !== lock.value) {
+                var target = lock.value;
+                try { writeValue(lock.record, target); if (value(lock.record) !== target) delete frozen[key]; }
+                catch (e) { delete frozen[key]; }
+            }
+        });
+        if (hooks.length && !Object.keys(frozen).length) removeHooks();
     }
     function gold(next) {
         next = integer(next, 0, g.$gameParty.maxGold());
@@ -237,6 +319,8 @@ function createToolkitRuntime(g, storage) {
     }
     return {
         kinds: kinds, prefs: prefs, project: project, list: list, db: db, value: value, title: title, alias: alias,
+        editable: editable, setMany: setMany, freezeMany: freezeMany, enforceFrozen: enforceFrozen,
+        isFrozen: function(r) { ensureSession(); return !!frozen[r.key]; }, frozenCount: function() { ensureSession(); return Object.keys(frozen).length; },
         search: search, printable: printable, integer: integer, setValue: setValue, gold: gold, actor: actor, actorAction: actorAction, equip: equip,
         undo: function() { undoAction(false); }, redo: function() { undoAction(true); },
         canUndo: function() { ensureSession(); return history.length > 0; }, canRedo: function() { ensureSession(); return redo.length > 0; },

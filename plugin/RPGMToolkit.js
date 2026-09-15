@@ -1,6 +1,6 @@
 /*:
  * @target MZ
- * @plugindesc v1.1.0 (MV/MZ) — Variables, inventaire, acteurs et traductions anglaises.
+ * @plugindesc v1.2.0 (MV/MZ) — Variables, inventaire, acteurs et traductions anglaises.
  * @author RPGM Toolkit
  *
  * @param Hotkey
@@ -34,7 +34,7 @@
  * @text Fermer le Toolkit
  *
  * @help
- * RPGM Toolkit 1.1.0 — RPG Maker MV 1.6+ / MZ
+ * RPGM Toolkit 1.2.0 — RPG Maker MV 1.6+ / MZ
  * Copiez ce fichier dans js/plugins, puis activez RPGMToolkit en dernier
  * dans le gestionnaire de plugins. Chargez une partie et appuyez sur F6.
  * Disponible sur la carte ; le jeu est mis en pause pendant l'édition.
@@ -67,7 +67,7 @@ function createToolkitRuntime(g, storage) {
     var kinds = ['variables', 'switches', 'items', 'weapons', 'armors', 'actors', 'skills', 'states', 'selfSwitches'];
     var cache = {}, history = [], redo = [], log = [], baseline = {}, session = null;
     var prefs = { english: true, source: 'ja', favorites: {}, aliases: {} };
-    var storageWarning = false;
+    var storageWarning = false, frozen = {}, hooks = [], writing = false;
     function own(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
     function normal(value) {
         var text = String(value == null ? '' : value).toLowerCase();
@@ -93,7 +93,7 @@ function createToolkitRuntime(g, storage) {
         Object.keys(saved.aliases || {}).slice(0, 50000).forEach(function(k) { if (/^[a-zA-Z]+:[0-9]+(?:\.[0-9]+\.[A-D])?$/.test(k) && validAlias(saved.aliases[k])) prefs.aliases[k] = saved.aliases[k]; });
     } catch (e) { storageWarning = true; }
     function ensureSession() {
-        if (session !== g.$gameVariables) { session = g.$gameVariables; history = []; redo = []; log = []; baseline = {}; cache = {}; }
+        if (session !== g.$gameVariables) { removeHooks(); frozen = {}; session = g.$gameVariables; history = []; redo = []; log = []; baseline = {}; cache = {}; }
     }
     function db(kind) {
         return { items: g.$dataItems, weapons: g.$dataWeapons, armors: g.$dataArmors, actors: g.$dataActors, skills: g.$dataSkills, states: g.$dataStates }[kind];
@@ -135,7 +135,7 @@ function createToolkitRuntime(g, storage) {
     function alias(r) { var a = prefs.aliases[r.key]; return a && a.original === r.original ? a.english : ''; }
     function title(r) { return (prefs.english && alias(r)) || r.original || '(sans nom)'; }
     function value(r) {
-        if (r.kind === 'variables') return g.$gameVariables.value(r.id);
+        if (r.kind === 'variables') { var raw = g.$gameVariables._data && g.$gameVariables._data[r.id]; return typeof raw === 'boolean' ? raw : g.$gameVariables.value(r.id); }
         if (r.kind === 'switches') return g.$gameSwitches.value(r.id);
         if (r.kind === 'selfSwitches') return g.$gameSelfSwitches.value(r.data);
         if (/^(items|weapons|armors)$/.test(r.kind)) return g.$gameParty.numItems(r.data);
@@ -156,6 +156,10 @@ function createToolkitRuntime(g, storage) {
     function search(kind, query, filter) {
         var tokens = normal(query).trim().split(/\s+/).filter(Boolean);
         return list(kind).filter(function(r) {
+            if (filter === 'int' && (typeof value(r) !== 'number' || !isFinite(value(r)) || Math.floor(value(r)) !== value(r))) return false;
+            if (filter === 'bool' && typeof value(r) !== 'boolean') return false;
+            if (filter === 'text' && typeof value(r) !== 'string') return false;
+            if (filter === 'frozen' && !frozen[r.key]) return false;
             if (filter === 'favorites' && !prefs.favorites[r.key]) return false;
             if (filter === 'named' && !r.original.trim()) return false;
             if (filter === 'active' && !value(r)) return false;
@@ -197,26 +201,104 @@ function createToolkitRuntime(g, storage) {
     function assertRecord(r) {
         if (!r || list(r.kind).indexOf(r) < 0) throw new Error('Entrée périmée. Actualisez la liste.');
     }
-    function setValue(r, next) {
+    function editable(r) { return /^(variables|switches|selfSwitches|items|weapons|armors)$/.test(r.kind) && /^(number|string|boolean)$/.test(typeof value(r)); }
+    function validateValue(r, next) {
         assertRecord(r);
-        var v = value(r);
+        if (!editable(r)) throw new Error('Cette entrée est en consultation : utilisez ses commandes spécifiques.');
         if (r.kind === 'variables') {
-            if (typeof v !== 'number' && typeof v !== 'string') throw new Error('Cette variable contient un type complexe : consultation uniquement.');
-            if (typeof next === 'number') next = integer(next, -9007199254740991, 9007199254740991);
-            else if (typeof next !== 'string' || next.length > 10000) throw new Error('Texte invalide (10 000 caractères maximum).');
-            return commit(title(r), function() { return value(r); }, function(x) { g.$gameVariables.setValue(r.id, x); }, next);
+            if (typeof next === 'number') return integer(next, -9007199254740991, 9007199254740991);
+            if (typeof next === 'boolean') return next;
+            if (typeof next === 'string' && next.length <= 10000) return next;
+            throw new Error('Nombre entier, booléen ou texte de 10 000 caractères maximum attendu.');
         }
         if (r.kind === 'switches' || r.kind === 'selfSwitches') {
-            if (typeof next !== 'boolean') throw new Error('ON ou OFF attendu.');
-            return commit(title(r), function() { return value(r); }, function(x) {
-                if (r.kind === 'switches') g.$gameSwitches.setValue(r.id, x); else g.$gameSelfSwitches.setValue(r.data, x);
-            }, next);
+            if (typeof next !== 'boolean') throw new Error('true ou false attendu pour tous les interrupteurs sélectionnés.');
+            return next;
         }
-        if (/^(items|weapons|armors)$/.test(r.kind)) {
-            next = integer(next, 0, g.$gameParty.maxItems(r.data));
-            return commit(title(r), function() { return value(r); }, function(x) { g.$gameParty.gainItem(r.data, x - value(r), false); }, next);
+        return integer(next, 0, g.$gameParty.maxItems(r.data));
+    }
+    function writeValue(r, next) {
+        var previous = writing; writing = true;
+        try {
+            if (r.kind === 'variables') g.$gameVariables.setValue(r.id, next);
+            else if (r.kind === 'switches') g.$gameSwitches.setValue(r.id, next);
+            else if (r.kind === 'selfSwitches') g.$gameSelfSwitches.setValue(r.data, next);
+            else g.$gameParty.gainItem(r.data, next - value(r), false);
+            if (frozen[r.key]) frozen[r.key].value = value(r);
+        } finally { writing = previous; }
+    }
+    function setValue(r, next) {
+        next = validateValue(r, next);
+        return commit(title(r), function() { return value(r); }, function(x) { writeValue(r, x); }, next);
+    }
+    function uniqueRecords(records) {
+        ensureSession();
+        if (!records.length || records.length > 500) throw new Error('Sélectionnez entre 1 et 500 entrées.');
+        var seen = {};
+        return records.filter(function(r) { assertRecord(r); if (seen[r.key]) return false; seen[r.key] = true; return true; });
+    }
+    function setMany(records, next) {
+        records = uniqueRecords(records);
+        var target = records.map(function(r) { return validateValue(r, next); });
+        function read() { return JSON.stringify(records.map(value)); }
+        function write(payload) {
+            var values = JSON.parse(payload), before = records.map(value), applied = 0;
+            records.forEach(function(r, i) { validateValue(r, values[i]); });
+            try {
+                records.forEach(function(r, i) { applied = i + 1; writeValue(r, values[i]); if (value(r) !== values[i]) throw new Error('Le moteur a refusé une valeur du groupe.'); });
+            } catch (e) {
+                var failed = false;
+                records.slice(0, applied).forEach(function(r, i) { try { writeValue(r, before[i]); if (value(r) !== before[i]) failed = true; } catch (_) { failed = true; } });
+                if (failed) { history = []; redo = []; throw new Error('Restauration incomplète : contrôlez les valeurs du groupe avant de sauvegarder.'); }
+                throw e;
+            }
         }
-        throw new Error('Utilisez les commandes de cette catégorie.');
+        commit(records.length + ' entrées', read, write, JSON.stringify(target));
+        return records.length;
+    }
+    function removeHooks() {
+        hooks.forEach(function(h) { if (h.object[h.name] === h.wrapper) { if (h.own) h.object[h.name] = h.original; else delete h.object[h.name]; } });
+        hooks = [];
+    }
+    function hook(object, name, key) {
+        if (!object || typeof object[name] !== 'function') return;
+        var original = object[name], hadOwn = own(object, name);
+        var wrapper = function() { var lock = frozen[key.apply(null, arguments)]; if (!writing && lock) return; return original.apply(this, arguments); };
+        // Non-enumerable: temporary guards must not be serialized in a save file.
+        Object.defineProperty(object, name, { value: wrapper, configurable: true, writable: true, enumerable: false });
+        hooks.push({ object: object, name: name, original: original, wrapper: wrapper, own: hadOwn });
+    }
+    function installHooks() {
+        if (hooks.length) return;
+        hook(g.$gameVariables, 'setValue', function(id) { return 'variables:' + id; });
+        hook(g.$gameSwitches, 'setValue', function(id) { return 'switches:' + id; });
+        hook(g.$gameSelfSwitches, 'setValue', function(key) { return 'selfSwitches:' + key.join('.'); });
+        hook(g.$gameParty, 'gainItem', function(item) {
+            if (!item) return '';
+            var kind = g.$dataItems[item.id] === item ? 'items' : g.$dataWeapons[item.id] === item ? 'weapons' : 'armors';
+            return kind + ':' + item.id;
+        });
+    }
+    function freezeMany(records, active) {
+        records = uniqueRecords(records);
+        if (active) records.forEach(function(r) { validateValue(r, value(r)); });
+        var added = records.filter(function(r) { return !frozen[r.key]; }).length;
+        if (active && Object.keys(frozen).length + added > 500) throw new Error('Maximum : 500 valeurs figées simultanément.');
+        records.forEach(function(r) { if (active) frozen[r.key] = { record:r, value:value(r) }; else delete frozen[r.key]; });
+        if (Object.keys(frozen).length) installHooks(); else removeHooks();
+        return records.length;
+    }
+    function enforceFrozen() {
+        ensureSession();
+        Object.keys(frozen).forEach(function(key) {
+            var lock = frozen[key];
+            if (value(lock.record) !== lock.value) {
+                var target = lock.value;
+                try { writeValue(lock.record, target); if (value(lock.record) !== target) delete frozen[key]; }
+                catch (e) { delete frozen[key]; }
+            }
+        });
+        if (hooks.length && !Object.keys(frozen).length) removeHooks();
     }
     function gold(next) {
         next = integer(next, 0, g.$gameParty.maxGold());
@@ -300,6 +382,8 @@ function createToolkitRuntime(g, storage) {
     }
     return {
         kinds: kinds, prefs: prefs, project: project, list: list, db: db, value: value, title: title, alias: alias,
+        editable: editable, setMany: setMany, freezeMany: freezeMany, enforceFrozen: enforceFrozen,
+        isFrozen: function(r) { ensureSession(); return !!frozen[r.key]; }, frozenCount: function() { ensureSession(); return Object.keys(frozen).length; },
         search: search, printable: printable, integer: integer, setValue: setValue, gold: gold, actor: actor, actorAction: actorAction, equip: equip,
         undo: function() { undoAction(false); }, redo: function() { undoAction(true); },
         canUndo: function() { ensureSession(); return history.length > 0; }, canRedo: function() { ensureSession(); return redo.length > 0; },
@@ -368,14 +452,15 @@ function createToolkitTranslator(runtime, g) {
     return { translate: translate, cancel: cancel, busy: function() { return running; } };
 }
 
-var TOOLKIT_CSS = ".rt, .rt-launch { box-sizing: border-box; font: 14px/1.5 'Segoe UI', Arial, sans-serif; color: #eff3f5; text-align: left; letter-spacing: normal; }\r\n.rt *, .rt *:before, .rt *:after { box-sizing: border-box; }\r\n.rt header, .rt footer, .rt main, .rt nav, .rt aside, .rt section { position: static; float: none; margin: 0; top: auto; right: auto; bottom: auto; left: auto; }\r\n.rt { position: fixed; z-index: 2147483001; inset: 0; top: 0; left: 0; right: 0; bottom: 0; background: rgba(5,9,13,.78); display: flex; align-items: center; justify-content: center; padding: 24px; user-select: text; }\r\n.rt[hidden], .rt-launch[hidden], .rt [hidden] { display: none !important; }\r\n.rt pre { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100%; }\r\n.rt button, .rt input, .rt select, .rt textarea { font: inherit; color: inherit; margin: 0; }\r\n.rt button, .rt-launch { cursor: pointer; border: 1px solid #5a606c; background: #30343a; border-radius: 6px; min-height: 36px; padding: 7px 12px; line-height: 1.4; }\r\n.rt button:hover, .rt-launch:hover { background: #40454d; border-color: #91a3ae; }\r\n.rt button:disabled { opacity: .45; cursor: default; }\r\n.rt button:focus-visible, .rt input:focus-visible, .rt select:focus-visible, .rt textarea:focus-visible, .rt-launch:focus-visible { outline: 2px solid #8cb3ea; outline-offset: 3px; }\r\n.rt button:focus, .rt input:focus, .rt select:focus, .rt textarea:focus { outline-color: #8cb3ea; }\r\n.rt input, .rt select, .rt textarea { width: 100%; border: 1px solid #5a606c; background: #181a1d; border-radius: 5px; padding: 9px 10px; min-height: 38px; }\r\n.rt input[type=checkbox] { width: 16px; min-height: 16px; height: 16px; accent-color: #8cb3ea; margin-right: 6px; }\r\n.rt textarea { min-height: 82px; resize: vertical; }\r\n.rt input::placeholder, .rt textarea::placeholder { color: #94a3ae; opacity: 1; }\r\n.rt .rt-primary { background: #8cb3ea; border-color: #8cb3ea; color: #202226; font-weight: 650; }\r\n.rt .rt-primary:hover { background: #b3cef4; border-color: #b3cef4; }\r\n.rt .rt-danger { color: #ffb9ab; }\r\n.rt .rt-panel { width: 1280px; max-width: 100%; height: 820px; max-height: 100%; display: flex; flex-direction: column; overflow: hidden; background: #1e2024; border: 1px solid #5a606c; border-radius: 12px; box-shadow: 0 24px 100px #0008; }\r\n.rt .rt-header { display: flex; align-items: center; flex-wrap: wrap; padding: 16px 20px; border-bottom: 1px solid #4d535d; }\r\n.rt .rt-brand { display: flex; align-items: center; flex: 1; min-width: 180px; }\r\n.rt .rt-logo { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; background: #8cb3ea; color: #202226; border-radius: 8px; margin-right: 12px; font-size: 20px; font-weight: 750; }\r\n.rt h1 { font-size: 17px; margin: 0; line-height: 1.4; font-weight: 650; }\r\n.rt .rt-eyebrow { color: #a8b8c2; font-size: 11px; letter-spacing: 1.6px; text-transform: uppercase; }\r\n.rt .rt-header-actions { display: flex; align-items: center; flex-wrap: wrap; }\r\n.rt .rt-header-actions > * { margin-left: 8px; }\r\n.rt .rt-paused { color: #a7c0e4; font-size: 12px; margin-right: 8px; }\r\n.rt .rt-body { display: flex; flex: 1; min-height: 0; }\r\n.rt .rt-nav { width: 190px; flex-shrink: 0; padding: 20px 12px; background: #181a1d; border-right: 1px solid #4d535d; overflow-y: auto; }\r\n.rt .rt-nav-label { display: block; padding: 0 10px 8px; color: #91a4b1; font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; }\r\n.rt .rt-nav button { display: flex; width: 100%; justify-content: space-between; align-items: center; background: transparent; border: 1px solid transparent; padding: 9px 10px; margin-bottom: 3px; text-align: left; }\r\n.rt .rt-nav button:hover { background: #2e3238; }\r\n.rt .rt-nav button[aria-current=page] { color: #adc9f1; background: #33363d; border-color: #555b66; }\r\n.rt .rt-nav .rt-nav-sep { border-top: 1px solid #4d535d; margin: 16px 0; }\r\n.rt .rt-nav-count { font-size: 11px; color: #b6c3ca; }\r\n.rt .rt-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }\r\n.rt .rt-toolbar { padding: 20px 24px 16px; border-bottom: 1px solid #4d535d; }\r\n.rt .rt-title-line { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }\r\n.rt h2 { font-size: 23px; line-height: 1.3; font-weight: 600; margin: 0 0 4px; }\r\n.rt h3 { font-size: 17px; font-weight: 600; margin: 0 0 12px; }\r\n.rt p { margin: 0 0 12px; }\r\n.rt .rt-muted { color: #afbec8; }\r\n.rt .rt-small { font-size: 12px; }\r\n.rt .rt-controls { display: flex; align-items: center; flex-wrap: wrap; margin: -4px; }\r\n.rt .rt-controls > * { margin: 4px; }\r\n.rt .rt-controls .rt-search { flex: 1; min-width: 160px; }\r\n.rt .rt-controls select { width: auto; max-width: 100%; }\r\n.rt .rt-checkbox { display: flex; align-items: center; white-space: nowrap; cursor: pointer; }\r\n.rt .rt-workbench { display: flex; flex: 1; min-height: 0; }\r\n.rt .rt-results { display: flex; flex-direction: column; flex: 1; min-width: 0; }\r\n.rt .rt-columns { display: flex; padding: 10px 20px; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: #9bacb7; border-bottom: 1px solid #4d535d; background: #24262b; }\r\n.rt .rt-columns span:first-child { flex: 1; }\r\n.rt .rt-list { flex: 1; min-height: 0; overflow-y: auto; padding: 0; margin: 0; list-style: none; }\r\n.rt .rt-row { display: flex; align-items: stretch; border-bottom: 1px solid #41464e; min-height: 62px; }\r\n.rt .rt-row:hover { background: #2c2f35; }\r\n.rt .rt-row.rt-selected { background: #31353b; box-shadow: inset 3px 0 #8cb3ea; }\r\n.rt .rt-row .rt-select { min-width: 0; width: 100%; display: flex; align-items: center; text-align: left; border: 0; border-radius: 0; padding: 10px 12px 10px 20px; background: transparent; }\r\n.rt .rt-row .rt-star { flex-shrink: 0; background: transparent; border: 0; width: 38px; border-radius: 0; padding: 0; font-size: 18px; color: #a8b8c2; }\r\n.rt .rt-row .rt-star[aria-pressed=true] { color: #f4d487; }\r\n.rt .rt-row-main { flex: 1; min-width: 0; padding-right: 8px; }\r\n.rt .rt-row-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; }\r\n.rt .rt-row-sub { display: block; color: #a4b5c0; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }\r\n.rt .rt-row-value { max-width: 100px; font: 13px/1.4 Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid #5a606c; border-radius: 4px; background: #23252a; padding: 3px 7px; }\r\n.rt .rt-icon { width: 28px; height: 28px; flex-shrink: 0; margin-right: 12px; image-rendering: pixelated; }\r\n.rt .rt-pagination { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; border-top: 1px solid #4d535d; font-size: 12px; }\r\n.rt .rt-detail { width: 330px; flex-shrink: 0; padding: 20px; overflow-y: auto; border-left: 1px solid #4d535d; background: #24262b; overflow-wrap: anywhere; }\r\n.rt .rt-detail .rt-id { display: inline-block; font: 11px Consolas, monospace; color: #b4c1d4; background: #33363d; border: 1px solid #535964; border-radius: 4px; padding: 3px 7px; margin-bottom: 12px; }\r\n.rt .rt-detail h3 { font-size: 21px; margin-bottom: 4px; }\r\n.rt .rt-divider { height: 1px; background: #4d535d; margin: 20px 0; }\r\n.rt .rt-field { display: block; margin: 0 0 12px; }\r\n.rt .rt-field > span { display: block; color: #bdcbd4; font-size: 12px; margin-bottom: 6px; }\r\n.rt .rt-actions { display: flex; flex-wrap: wrap; margin: -4px; }\r\n.rt .rt-actions > * { margin: 4px; }\r\n.rt .rt-full { width: 100%; }\r\n.rt .rt-note { background: #2a2e33; color: #c4d1e4; border: 1px solid #535964; padding: 12px; border-radius: 6px; font-size: 12px; margin: 12px 0; }\r\n.rt .rt-empty { padding: 48px 24px; text-align: center; color: #afbec8; }\r\n.rt .rt-empty strong { display: block; color: #eff3f5; margin: 8px 0; font-size: 17px; }\r\n.rt .rt-empty-symbol { display: block; font-size: 34px; color: #839bbd; }\r\n.rt .rt-footer { border-top: 1px solid #4d535d; background: #181a1d; padding: 10px 20px; display: flex; align-items: center; min-height: 42px; }\r\n.rt .rt-status { flex: 1; color: #bdc7d4; font-size: 12px; overflow-wrap: anywhere; }\r\n.rt .rt-status.rt-error { color: #ffb9ab; }\r\n.rt .rt-footer-hint { color: #97a9b5; font-size: 11px; margin-left: 12px; }\r\n.rt kbd { font: 11px Consolas, monospace; border: 1px solid #5a606c; border-radius: 3px; padding: 2px 4px; }\r\n.rt .rt-page { padding: 24px; overflow-y: auto; flex: 1; min-height: 0; }\r\n.rt .rt-page form, .rt .rt-page section { max-width: 720px; }\r\n.rt .rt-page .rt-field { max-width: 420px; }\r\n.rt .rt-stats { display: flex; flex-wrap: wrap; border: 1px solid #5a606c; border-radius: 8px; margin: 20px 0; }\r\n.rt .rt-stat { flex: 1; padding: 16px; min-width: 130px; }\r\n.rt .rt-stat strong { display: block; font-size: 25px; }\r\n.rt .rt-log-entry { padding: 14px 0; border-bottom: 1px solid #4d535d; }\r\n.rt .rt-log-entry strong { display: block; }\r\n.rt .rt-log-entry code { color: #b5c9e5; word-break: break-word; }\r\n.rt .rt-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }\r\n.rt-launch { position: fixed; z-index: 2147483000; right: 14px; top: 14px; box-shadow: 0 3px 20px #0007; border-color: #707887; background: #222529; color: #c6d9f4; font-size: 12px; padding: 8px 12px; }\r\n@media (max-width: 1050px) { .rt { padding: 12px; } .rt .rt-nav { width: 155px; padding: 16px 8px; } .rt .rt-detail { width: 290px; padding: 16px; } .rt .rt-toolbar { padding: 16px; } .rt .rt-footer-hint { display: none; } }\r\n@media (max-width: 800px) { .rt .rt-body { flex-direction: column; } .rt .rt-nav { display: flex; width: auto; padding: 8px; overflow-x: auto; flex-shrink: 0; border-right: 0; border-bottom: 1px solid #4d535d; } .rt .rt-nav button { width: auto; flex-shrink: 0; margin: 0 4px 0 0; white-space: nowrap; } .rt .rt-nav-count { margin-left: 8px; } .rt .rt-nav-label, .rt .rt-nav-sep { display: none; } .rt .rt-main { min-height: 0; } .rt .rt-detail { width: 42%; } .rt .rt-header { padding: 12px; } .rt .rt-paused { display: none; } .rt .rt-toolbar { padding: 12px; } }\r\n@media (max-width: 580px) { .rt { padding: 0; } .rt .rt-panel { border-radius: 0; border: 0; height: 100%; } .rt .rt-header-actions { margin-top: 8px; width: 100%; justify-content: flex-end; } .rt .rt-header-actions button { font-size: 12px; } .rt .rt-workbench { display: block; overflow-y: auto; } .rt .rt-results { height: 290px; } .rt .rt-detail { width: auto; border-left: 0; border-top: 1px solid #5a606c; overflow: visible; } .rt .rt-title-line { margin-bottom: 10px; } .rt h2 { font-size: 20px; } .rt .rt-controls .rt-search { min-width: 100%; } .rt .rt-controls select { flex: 1; width: 130px; } .rt .rt-controls button { font-size: 12px; } .rt .rt-footer { padding: 8px 12px; } .rt .rt-page { padding: 16px; } .rt .rt-columns { padding: 7px 14px; } }\r\n@media (prefers-reduced-motion: reduce) { .rt *, .rt-launch { scroll-behavior: auto !important; transition: none !important; } }\r\n\r\n/* Touch layout: keep results and editor as separate screens. */\r\n.rt button, .rt input, .rt select, .rt textarea, .rt-launch { touch-action: manipulation; }\r\n.rt .rt-back { display:none; }\r\n.rt .rt-tools { margin-top:8px; }\r\n.rt .rt-tools summary { cursor:pointer; padding:10px 0; color:#b6c4d7; }\r\n.rt .rt-list, .rt .rt-detail, .rt .rt-page, .rt .rt-nav { overscroll-behavior:contain; -webkit-overflow-scrolling:touch; }\r\n@media (pointer:coarse), (max-width:800px) {\r\n .rt button, .rt input:not([type=checkbox]), .rt select, .rt-launch { min-height:48px; }\r\n .rt input, .rt select, .rt textarea { font-size:16px; }\r\n .rt .rt-checkbox { min-height:48px; }\r\n .rt .rt-row .rt-star { width:48px; }\r\n .rt .rt-pagination button { min-width:48px; }\r\n}\r\n@media (max-width:800px), (max-width:950px) and (max-height:500px) {\r\n .rt { padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px); }\r\n .rt .rt-panel { height:100%; border-radius:0; }\r\n .rt .rt-header { padding:8px 12px; flex-wrap:nowrap; gap:8px; }\r\n .rt .rt-brand { min-width:0; }\r\n .rt .rt-logo, .rt .rt-eyebrow { display:none; }\r\n .rt h1 { font-size:14px; }\r\n .rt .rt-header-actions { width:auto; margin:0; flex-wrap:nowrap; }\r\n .rt .rt-header-actions > * { margin-left:4px; }\r\n .rt .rt-header-actions button { padding:8px; font-size:12px; }\r\n .rt .rt-nav { padding:4px 8px; }\r\n .rt .rt-workbench { display:flex; overflow:hidden; }\r\n .rt .rt-results { height:auto; }\r\n .rt .rt-detail { display:none; width:100%; border:0; overflow-y:auto; padding:12px 16px 24px; }\r\n .rt.rt-detail-open .rt-detail { display:block; }\r\n .rt.rt-detail-open .rt-results, .rt.rt-detail-open .rt-toolbar, .rt.rt-detail-open .rt-nav { display:none; }\r\n .rt .rt-back { display:block; position:sticky; top:-12px; width:100%; text-align:left; margin-bottom:16px; background:#33363d; z-index:1; }\r\n .rt .rt-toolbar { padding:8px 12px; max-height:55%; overflow-y:auto; flex-shrink:0; }\r\n .rt .rt-title-line { margin-bottom:8px; }\r\n .rt .rt-title-line p { display:none; }\r\n .rt .rt-controls .rt-search { min-width:140px; }\r\n .rt .rt-controls select { width:130px; }\r\n .rt .rt-footer { min-height:32px; padding:6px 12px; }\r\n .rt .rt-status { font-size:12px; }\r\n .rt .rt-row-sub { font-size:12px; }\r\n}\r\n@media (max-height:500px) and (max-width:950px) {\r\n .rt .rt-header { padding:4px 8px; }\r\n .rt .rt-title-line, .rt .rt-columns { display:none; }\r\n .rt .rt-tools { margin-top:0; }\r\n .rt .rt-footer { max-height:48px; overflow-y:auto; }\r\n}\r\n";
+var TOOLKIT_CSS = "/* Compact full-screen editor. No width-dependent sidebar or oversized touch theme. */\r\n.rt,.rt-launch { box-sizing:border-box; font:13px/1.4 system-ui,'Segoe UI',Arial,sans-serif; color:#eef0f4; text-align:left; letter-spacing:normal; }\r\n.rt *,.rt *::before,.rt *::after { box-sizing:border-box; }\r\n.rt { position:fixed; z-index:2147483001; inset:0; display:flex; padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px); background:#181a1f; user-select:text; }\r\n.rt[hidden],.rt [hidden],.rt-launch[hidden] { display:none !important; }\r\n.rt header,.rt main,.rt footer,.rt section,.rt aside,.rt nav { position:static; top:auto; right:auto; bottom:auto; left:auto; float:none; margin:0; }\n.rt button,.rt input,.rt select,.rt textarea { font:inherit; color:inherit; margin:0; touch-action:manipulation; }\r\n.rt button { cursor:pointer; border:1px solid #4f5663; border-radius:4px; background:#292d35; padding:4px 8px; min-height:30px; line-height:1.2; white-space:nowrap; }\r\n.rt button:hover { background:#363d49; }\r\n.rt button:disabled { opacity:.38; cursor:default; }\r\n.rt button:focus-visible,.rt input:focus-visible,.rt select:focus-visible,.rt textarea:focus-visible,.rt-launch:focus-visible { outline:2px solid #a9cafa; outline-offset:-2px; }\r\n.rt button[aria-pressed=true] { color:#b7d3fb; border-color:#799dcd; background:#2a3b53; }\r\n.rt .rt-primary { background:#91b8ee; color:#10223a; border-color:#91b8ee; font-weight:600; }\n.rt .rt-primary:hover { background:#b2cff7; color:#10223a; }\n.rt input:not([type=checkbox]),.rt select,.rt textarea { width:100%; min-width:0; border:1px solid #535c6c; border-radius:4px; background:#15171c; padding:4px 7px; min-height:30px; }\r\n.rt input::placeholder { color:#a9b2c1; opacity:1; }\r\n.rt input[type=checkbox] { width:16px; height:16px; accent-color:#91b8ee; flex-shrink:0; cursor:pointer; }\r\n.rt .rt-panel { display:flex; flex-direction:column; width:100%; height:100%; min-height:0; min-width:0; overflow:hidden; background:#1e2127; }\r\n.rt .rt-header { flex-shrink:0; padding:5px 8px; border-bottom:1px solid #505764; background:#191c22; }\r\n.rt .rt-search-line { display:flex; gap:6px; align-items:center; }\r\n.rt .rt-search { flex:1; min-width:0; }\r\n.rt .rt-close { min-width:32px; width:32px; padding:0; flex-shrink:0; }\r\n.rt .rt-filter-line { display:flex; gap:6px; margin-top:5px; }\r\n.rt .rt-filter-line label { flex:1; min-width:0; }\r\n.rt .rt-filter-line select { padding-right:2px; }\r\n.rt .rt-main { display:flex; flex-direction:column; min-height:0; min-width:0; flex:1; overflow:hidden; }\r\n.rt .rt-bulkbar { display:flex; justify-content:space-between; gap:6px; align-items:center; min-height:30px; padding:0 6px; border-bottom:1px solid #444c59; background:#252932; font-size:11px; flex-shrink:0; }\r\n.rt .rt-page-check { display:flex; align-items:center; gap:6px; min-height:30px; cursor:pointer; }\r\n.rt #rt-bulk-actions { display:flex; gap:3px; }\r\n.rt #rt-bulk-actions button { min-height:26px; padding:3px 6px; font-size:11px; }\r\n.rt .rt-list { flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; touch-action:pan-y; list-style:none; margin:0; padding:0; scrollbar-width:thin; }\r\n.rt .rt-row { display:flex; align-items:center; gap:4px; height:36px; min-height:36px; padding:2px 6px; border-bottom:1px solid #383f4b; }\r\n.rt .rt-row:nth-child(even) { background:#23272f; }\r\n.rt .rt-row.rt-frozen { box-shadow:inset 2px 0 #91b8ee; }\r\n.rt .rt-row-check { display:flex; align-items:center; justify-content:center; width:24px; height:32px; flex-shrink:0; cursor:pointer; }\r\n.rt .rt-select { display:flex; align-items:center; gap:6px; flex:1; min-width:0; text-align:left; border:0; background:transparent; padding:0 3px; height:30px; }\r\n.rt .rt-select:hover { background:transparent; }\r\n.rt .rt-row-id { color:#a8b3c4; font-size:10px; flex-shrink:0; max-width:64px; overflow:hidden; text-overflow:ellipsis; }\r\n.rt .rt-row-title { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }\r\n.rt .rt-row-value { font:12px/1.4 Consolas,monospace; flex-shrink:0; width:72px; padding:2px 4px; border:1px solid #4b5565; border-radius:3px; background:#161b23; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right; }\r\n.rt .rt-row-actions { display:flex; align-items:center; gap:3px; flex-shrink:0; }\r\n.rt .rt-quick { min-width:28px; min-height:28px; height:28px; padding:2px 4px; font-size:12px; }\r\n.rt .rt-pagination { display:flex; align-items:center; justify-content:space-between; gap:8px; height:30px; padding:2px 8px; border-top:1px solid #4c5462; background:#191d24; font-size:11px; flex-shrink:0; }\r\n.rt .rt-pagination > div { display:flex; align-items:center; gap:4px; }\r\n.rt .rt-pagination button { min-height:24px; height:24px; min-width:28px; padding:0 5px; font-size:17px; }\r\n.rt .rt-pagination input { width:42px; min-height:24px; height:24px; padding:1px 2px; text-align:center; font-size:11px; -moz-appearance:textfield; }\r\n.rt .rt-pagination input::-webkit-inner-spin-button { -webkit-appearance:none; }\r\n.rt .rt-footer { display:flex; align-items:center; gap:8px; padding:4px 8px; min-height:38px; background:#16191f; border-top:1px solid #505867; flex-shrink:0; }\r\n.rt .rt-footer button { font-size:12px; }\r\n.rt .rt-status { flex:1; min-width:0; font-size:11px; color:#bdcce1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }\r\n.rt .rt-error { color:#ffbda9; }\r\n.rt .rt-modal { position:absolute; inset:0; z-index:2; display:flex; align-items:center; justify-content:center; padding:12px; background:#080b10c9; }\r\n.rt .rt-modal-dialog { width:480px; max-width:100%; max-height:100%; min-height:0; display:flex; flex-direction:column; border:1px solid #73839d; border-radius:8px; background:#242932; box-shadow:0 16px 48px #0009; overflow:hidden; }\r\n.rt .rt-modal-dialog > header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 12px; border-bottom:1px solid #505c70; background:#1b2029; }\r\n.rt .rt-modal-dialog > header h2 { margin:0; font-size:15px; font-weight:600; }\r\n.rt .rt-modal-content { overflow-y:auto; min-height:0; padding:12px; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; overflow-wrap:anywhere; }\r\n.rt .rt-modal-status { padding:0 12px 8px; font-size:12px; color:#bad4f9; }\r\n.rt .rt-modal-status:empty { display:none; }\r\n.rt .rt-modal-content p { margin:0 0 10px; }\r\n.rt h2 { font-size:18px; margin:0 0 12px; }\r\n.rt h3 { font-size:17px; margin:0 0 8px; }\r\n.rt h4 { margin:12px 0 6px; }\r\n.rt .rt-id { display:block; color:#b1c9eb; font:11px Consolas,monospace; margin-bottom:8px; }\r\n.rt .rt-field { display:block; margin:0 0 12px; }\r\n.rt .rt-field > span { display:block; color:#becada; margin-bottom:4px; font-size:12px; }\r\n.rt .rt-modal-content input:not([type=checkbox]),.rt .rt-modal-content select,.rt .rt-modal-content textarea { font-size:16px; min-height:34px; }\r\n.rt textarea { min-height:64px; resize:vertical; }\r\n.rt .rt-full { width:100%; }\r\n.rt .rt-actions { display:flex; flex-wrap:wrap; gap:6px; }\r\n.rt .rt-divider { height:1px; background:#4b5566; margin:14px 0; }\r\n.rt .rt-muted { color:#b7c2d2; }\r\n.rt .rt-small { font-size:12px; }\r\n.rt .rt-note { background:#222f42; color:#c4d8f5; border:1px solid #576c8b; border-radius:4px; padding:8px; margin:10px 0; font-size:12px; }\r\n.rt .rt-empty { padding:24px 12px; text-align:center; color:#b9c4d4; }\r\n.rt pre { white-space:pre-wrap; overflow-wrap:anywhere; }\r\n.rt .rt-checkbox { display:flex; align-items:center; gap:8px; padding:6px 0; }\r\n.rt .rt-stats { display:flex; flex-wrap:wrap; gap:12px; margin:12px 0; }\r\n.rt .rt-stat strong { display:block; font-size:20px; }\r\n.rt .rt-log-entry { border-bottom:1px solid #505867; padding:10px 0; }\r\n.rt .rt-log-entry strong { display:block; }\r\n.rt code { word-break:break-word; }\r\n.rt .rt-sr { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }\r\n.rt-launch { position:fixed; top:12px; right:12px; z-index:2147483000; background:#26374e; border:1px solid #8daedb; border-radius:5px; padding:6px 10px; cursor:pointer; }\r\n@media(max-width:500px) {\r\n .rt .rt-row { gap:2px; padding:2px 3px; }\r\n .rt .rt-row-check { width:20px; }\r\n .rt .rt-row-id { display:none; }\r\n .rt .rt-row-value { width:48px; }\r\n .rt .rt-row-actions { gap:2px; }\r\n .rt .rt-quick { min-width:24px; padding:2px 3px; font-size:11px; }\r\n .rt .rt-select { font-size:12px; }\r\n .rt .rt-footer { gap:4px; }\r\n .rt .rt-status { font-size:10px; }\r\n .rt .rt-modal { padding:8px; }\r\n}\r\n@media(prefers-reduced-motion:reduce) { .rt * { scroll-behavior:auto !important; transition:none !important; } }\r\n";
 /* DOM overlay; no engine assets, dependencies or timers while closed. */
 var toolkitParams = g.PluginManager && g.PluginManager.parameters('RPGMToolkit') || {};
 var hotkey = /^(F6|F7|F10)$/.test(toolkitParams.Hotkey || '') ? toolkitParams.Hotkey : 'F6';
 var pageSize = Math.max(20, Math.min(80, Number(toolkitParams.PageSize) || 60));
 var runtime, translator, root, launch, previousFocus, openScene, openVariables, searchTimer;
 var opened = false, dirty = false, tab = 'variables', query = '', filter = 'all', page = 0, selected = null, found = [];
-var chosenActor = '';
+var chosenActor = '', checked = {}, modalMode = '', modalFocus = null, exactValue = '';
+function picked() { return Object.keys(checked).map(function(k) { return checked[k]; }); }
 var labels = { favorites: 'Favoris', variables: 'Variables', switches: 'Interrupteurs', selfSwitches: 'Interr. locaux', items: 'Objets', weapons: 'Armes', armors: 'Armures', actors: 'Acteurs', skills: 'Compétences', states: 'États', party: 'Partie', translations: 'Traductions', history: 'Historique' };
 var hints = { variables: 'Retrouvez et modifiez les valeurs de votre partie.', switches: 'Contrôlez les interrupteurs globaux du jeu.', selfSwitches: 'Interrupteurs A–D des événements de la carte actuelle.', items: 'Objets usuels, objets clés et objets masqués.', weapons: 'Recherchez une arme et ajustez votre inventaire.', armors: 'Armures, accessoires et équipements.', actors: 'Statistiques, progression et équipement des acteurs.', skills: 'Apprenez ou retirez une compétence à un acteur.', states: 'Ajoutez ou retirez les états d’un acteur.', favorites: 'Vos entrées épinglées, réunies au même endroit.' };
 function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function(c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
@@ -383,7 +468,7 @@ function $(selector) { return root.querySelector(selector); }
 function button(text, action, cls) { return '<button type="button" data-action="' + action + '" class="' + (cls || '') + '">' + text + '</button>'; }
 function field(label, id, value, type, attrs) { return '<label class="rt-field"><span>' + esc(label) + '</span><input id="' + id + '" type="' + (type || 'text') + '" value="' + esc(value) + '" ' + (attrs || '') + '></label>'; }
 function empty(title, description) { return '<div class="rt-empty"><span class="rt-empty-symbol" aria-hidden="true">◇</span><strong>' + esc(title) + '</strong>' + esc(description) + '</div>'; }
-function say(message, error) { if (root) { $('.rt-status').textContent = message; $('.rt-status').className = 'rt-status' + (error ? ' rt-error' : ''); } }
+function say(message, error) { if (root) { if (modalMode) { $('.rt-modal-status').textContent = message; $('.rt-modal-status').className = 'rt-modal-status' + (error ? ' rt-error' : ''); } $('.rt-status').textContent = message; $('.rt-status').className = 'rt-status' + (error ? ' rt-error' : ''); } }
 function guarded(fn) { try { return fn(); } catch (e) { say(e.message || String(e), true); return undefined; } }
 function clearInput() { if (g.Input) g.Input.clear(); if (g.TouchInput) g.TouchInput.clear(); if (g.$gameTemp && g.$gameTemp.clearDestination) g.$gameTemp.clearDestination(); }
 function allowed() {
@@ -415,7 +500,12 @@ function buildRoot() {
     var style = document.createElement('style'); style.id = 'rpgm-toolkit-style'; style.textContent = TOOLKIT_CSS; document.head.appendChild(style);
     root = document.createElement('div'); root.className = 'rt'; root.id = 'rpgm-toolkit'; root.hidden = true;
     root.setAttribute('lang', 'fr');
-    root.innerHTML = '<section class="rt-panel" role="dialog" aria-modal="true" aria-labelledby="rt-heading" tabindex="-1"><header class="rt-header"><div class="rt-brand"><span class="rt-logo" aria-hidden="true">R</span><div><div class="rt-eyebrow">RPG MAKER · TOOLKIT</div><h1 id="rt-heading">RPGM Toolkit</h1></div></div><div class="rt-header-actions"><span class="rt-paused">Ⅱ Jeu en pause</span>' + button('↶ Annuler', 'undo') + button('↷ Rétablir', 'redo') + button('Fermer <kbd>' + hotkey + '</kbd>', 'close') + '</div></header><div class="rt-body"><nav class="rt-nav" aria-label="Catégories"></nav><main class="rt-main"></main></div><footer class="rt-footer"><div class="rt-status" role="status" aria-live="polite"></div><span class="rt-footer-hint"><kbd>Ctrl F</kbd> Rechercher · <kbd>Échap</kbd> Fermer</span></footer></section>';
+    root.innerHTML = '<section class="rt-panel" role="dialog" aria-modal="true" aria-label="RPGM Toolkit" tabindex="-1"><header class="rt-header"><div class="rt-search-line"><label class="rt-search"><span class="rt-sr">Rechercher par nom, ID ou valeur</span><input id="rt-search" type="search" placeholder="Rechercher · nom, #ID, value:42" autocomplete="off"></label>' + button('✕', 'close', 'rt-close') + '</div><div class="rt-filter-line"><label><span class="rt-sr">Catégorie</span><select id="rt-category"></select></label><label><span class="rt-sr">Filtrer les entrées</span><select id="rt-filter"><option value="all">Tous les types</option><option value="int">Int · entiers</option><option value="bool">Bool · true/false</option><option value="text">Texte</option><option value="value">Valeur exacte…</option><option value="favorites">Favoris</option><option value="frozen">Figés</option><option value="named">Avec un nom</option><option value="active">Non nul / possédé</option><option value="changed">Modifiés</option></select></label><label id="rt-exact-wrap" hidden><span class="rt-sr">Valeur exacte</span><input id="rt-exact" placeholder="Valeur" type="text"></label></div></header><main class="rt-main"><div class="rt-bulkbar"><label class="rt-page-check"><input id="rt-select-page" type="checkbox" aria-label="Sélectionner cette page"><span id="rt-selection-count">Sélection</span></label><div id="rt-bulk-actions" hidden>' + button('Valeur', 'bulk-edit') + button('Figer', 'bulk-freeze') + button('Libérer', 'bulk-unfreeze') + button('×', 'clear-selection') + '</div></div><ul class="rt-list" aria-label="Entrées"></ul><div class="rt-pagination"><span id="rt-count" aria-live="polite"></span><div>' + button('‹', 'prev') + '<label><span class="rt-sr">Numéro de page</span><input id="rt-page-number" type="number" min="1" step="1" inputmode="numeric"></label><span id="rt-page-total"></span>' + button('›', 'next') + '</div></div></main><footer class="rt-footer">' + button('Traduction', 'translate-selection') + '<span class="rt-status" role="status" aria-live="polite"></span>' + button('Enregistrer', 'save-menu', 'rt-primary') + '</footer></section><div class="rt-modal" hidden><section class="rt-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="rt-modal-title" tabindex="-1"><header><h2 id="rt-modal-title">Édition</h2>' + button('✕', 'modal-close', 'rt-close') + '</header><div class="rt-modal-content"></div><div class="rt-modal-status" role="status" aria-live="polite"></div></section></div>';
+    $('[data-action="close"]').setAttribute('aria-label', 'Fermer le Toolkit');
+    $('[data-action="modal-close"]').setAttribute('aria-label', 'Fermer la fenêtre');
+    $('[data-action="clear-selection"]').setAttribute('aria-label', 'Effacer la sélection');
+    $('[data-action="prev"]').setAttribute('aria-label', 'Page précédente');
+    $('[data-action="next"]').setAttribute('aria-label', 'Page suivante');
     document.body.appendChild(root);
     ['keydown', 'keyup', 'keypress', 'mousedown', 'mouseup', 'mousemove', 'click', 'dblclick', 'contextmenu', 'touchstart', 'touchmove', 'touchend', 'wheel', 'pointerdown', 'pointerup'].forEach(function(type) {
         root.addEventListener(type, function(event) { event.stopPropagation(); }, { passive: type.indexOf('touch') === 0 || type === 'wheel' });
@@ -427,6 +517,7 @@ function buildRoot() {
     });
     root.addEventListener('submit', function(event) { event.preventDefault(); guarded(function() { submit(event.target.getAttribute('data-form')); }); });
     root.addEventListener('input', function(event) {
+        if (event.target.id === 'rt-exact') { exactValue = event.target.value; page = 0; clearTimeout(searchTimer); searchTimer = setTimeout(renderList,120); }
         if (event.target.id === 'rt-search') { query = event.target.value; clearTimeout(searchTimer); searchTimer = setTimeout(function() { page = 0; renderList(); }, 120); }
     });
     root.addEventListener('keydown', function(event) {
@@ -439,7 +530,20 @@ function buildRoot() {
     });
     root.addEventListener('change', function(event) {
         guarded(function() {
-            if (event.target.id === 'rt-filter') { filter = event.target.value; page = 0; renderList(); }
+            if (event.target.id === 'rt-filter') { filter = event.target.value; $('#rt-exact-wrap').hidden = filter !== 'value'; page = 0; renderList(); }
+            if (event.target.id === 'rt-category') {
+                var category = event.target.value;
+                if (/^(party|translations|history)$/.test(category)) { $('#rt-category').value = tab; openModal(category, labels[category]); if (category === 'party') renderParty(); else if (category === 'history') renderHistory(); else { pendingTranslations = picked(); renderTranslations(); } }
+                else { tab = category; checked = {}; selected = null; page = 0; render(); }
+            }
+            if (event.target.id === 'rt-page-number') { page = runtime.integer(event.target.value,1,Math.max(1,Math.ceil(found.length/pageSize))) - 1; renderList(); $('.rt-list').scrollTop = 0; }
+            if (event.target.id === 'rt-select-page') {
+                var rows = found.slice(page*pageSize,(page+1)*pageSize), active = event.target.checked;
+                if (active && picked().length + rows.filter(function(r) { return !checked[r.key]; }).length > 500) throw new Error('Maximum : 500 entrées sélectionnées.');
+                rows.forEach(function(r) { if (active) checked[r.key] = r; else delete checked[r.key]; }); renderList();
+            }
+            if (event.target.hasAttribute('data-check-index')) { var record = found[Number(event.target.getAttribute('data-check-index'))]; if (event.target.checked) { if (picked().length >= 500) { event.target.checked = false; throw new Error('Maximum : 500 entrées sélectionnées.'); } checked[record.key] = record; } else delete checked[record.key]; updateSelection(); }
+            if (event.target.id === 'rt-value-type') updateValueInput();
             if (event.target.id === 'rt-english') { runtime.prefs.english = event.target.checked; runtime.savePrefs(); renderList(); renderDetail(); }
             if (event.target.id === 'rt-source') { runtime.prefs.source = event.target.value; runtime.savePrefs(); }
             if (event.target.id === 'rt-import') importFile(event.target.files[0]);
@@ -449,26 +553,37 @@ function buildRoot() {
     });
 }
 function renderNav() {
-    var nav = '<span class="rt-nav-label">Explorer la partie</span>';
-    ['favorites', 'variables', 'switches', 'selfSwitches', 'items', 'weapons', 'armors', 'actors', 'skills', 'states'].forEach(function(k) {
-        nav += '<button type="button" data-action="tab" data-tab="' + k + '"' + (tab === k ? ' aria-current="page"' : '') + '><span>' + esc(labels[k]) + '</span><span class="rt-nav-count">' + runtime.list(k).length.toLocaleString() + '</span></button>';
-    });
-    nav += '<div class="rt-nav-sep"></div>';
-    ['party', 'translations', 'history'].forEach(function(k) { nav += '<button type="button" data-action="tab" data-tab="' + k + '"' + (tab === k ? ' aria-current="page"' : '') + '>' + esc(labels[k]) + '</button>'; });
-    $('.rt-nav').innerHTML = nav;
+    $('#rt-category').innerHTML = Object.keys(labels).map(function(k) { return '<option value="' + k + '">' + esc(labels[k]) + '</option>'; }).join('');
+    $('#rt-category').value = tab;
 }
 function render() {
-    root.classList.remove('rt-detail-open');
-    clearTimeout(searchTimer);
-    renderNav(); updateHistoryButtons();
-    if (tab === 'party') { renderParty(); return; }
-    if (tab === 'translations') { renderTranslations(); return; }
-    if (tab === 'history') { renderHistory(); return; }
-    $('.rt-main').innerHTML = '<div class="rt-toolbar"><div class="rt-title-line"><div><h2>' + esc(labels[tab]) + '</h2><p class="rt-muted rt-small" style="margin:0">' + esc(hints[tab]) + '</p></div></div><div class="rt-controls"><label class="rt-search"><span class="rt-sr">Rechercher par nom, ID ou valeur</span><input id="rt-search" type="search" placeholder="Rechercher un nom, #ID, value:42…" value="' + esc(query) + '"></label><label><span class="rt-sr">Filtrer les entrées</span><select id="rt-filter"><option value="all">Tout afficher</option><option value="named">Avec un nom</option><option value="favorites">Favoris</option><option value="active">Non nul / possédé / ON</option><option value="changed">Changé depuis le repère</option></select></label></div><details class="rt-tools"><summary>Options et traduction</summary><div class="rt-controls" style="margin-top:8px"><label class="rt-checkbox rt-small"><input type="checkbox" id="rt-english"' + (runtime.prefs.english ? ' checked' : '') + '>Noms anglais</label>' + button('Traduire cette page', 'translate-page') + button('Créer un repère', 'baseline') + button('Actualiser', 'refresh') + '</div></details></div><div class="rt-workbench"><section class="rt-results" aria-label="Résultats"><div class="rt-columns"><span>Nom / identifiant</span><span>Valeur</span></div><ul class="rt-list" aria-label="Entrées"></ul><div class="rt-pagination"><span id="rt-count" aria-live="polite"></span><div>' + button('‹', 'prev') + ' ' + button('›', 'next') + '</div></div></section><aside class="rt-detail" aria-label="Détails et édition"></aside></div>';
-    $('#rt-filter').value = filter;
-    $('[data-action="prev"]').setAttribute('aria-label', 'Page précédente');
-    $('[data-action="next"]').setAttribute('aria-label', 'Page suivante');
-    renderList(); renderDetail();
+    clearTimeout(searchTimer); renderNav(); $('#rt-search').value = query; $('#rt-filter').value = filter; renderList();
+}
+function openModal(mode, title) {
+    if (!modalMode) modalFocus = document.activeElement;
+    modalMode = mode; $('.rt-modal').hidden = false; $('.rt-modal-content').innerHTML = ''; $('.rt-modal-status').textContent = '';
+    $('#rt-modal-title').textContent = title; $('.rt-panel').setAttribute('aria-hidden','true'); $('.rt-panel').inert = true;
+    $('.rt-modal-dialog').focus();
+}
+function closeModal() {
+    if (!modalMode) return;
+    modalMode = ''; $('.rt-modal').hidden = true; $('.rt-panel').removeAttribute('aria-hidden'); $('.rt-panel').inert = false;
+    if (opened) renderList();
+    if (modalFocus && document.contains(modalFocus)) modalFocus.focus(); else $('.rt-panel').focus();
+}
+function updateSelection() {
+    var n = picked().length, rows = found.slice(page*pageSize,(page+1)*pageSize);
+    $('#rt-selection-count').textContent = n ? n + ' sélectionné(s)' : 'Sélection';
+    $('#rt-bulk-actions').hidden = !n;
+    $('#rt-select-page').checked = !!rows.length && rows.every(function(r) { return !!checked[r.key]; });
+    $('#rt-select-page').indeterminate = rows.some(function(r) { return !!checked[r.key]; }) && !$('#rt-select-page').checked;
+    $('#rt-select-page').disabled = !rows.length;
+}
+function rowAction(text, action, index, label, pressed, disabled) {
+    return '<button type="button" class="rt-quick" data-action="' + action + '" data-index="' + index + '" aria-label="' + esc(label) + '" title="' + esc(label) + '"' + (typeof pressed === 'boolean' ? ' aria-pressed="' + pressed + '"' : '') + (disabled ? ' disabled' : '') + '>' + text + '</button>';
+}
+function lockIcon(locked) {
+    return '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5"/>' + (locked ? '<path d="M5 7V5a3 3 0 016 0v2"/>' : '<path d="M5 7V5a3 3 0 015-2"/>') + '<path d="M8 10v2"/></svg>';
 }
 function rowValue(r) {
     var v = runtime.printable(runtime.value(r));
@@ -480,16 +595,20 @@ function rowValue(r) {
 function renderList() {
     if (!$('.rt-list')) return;
     found = runtime.search(tab, query, filter);
-    page = Math.max(0, Math.min(page, Math.ceil(found.length / pageSize) - 1));
-    var start = page * pageSize, rows = found.slice(start, start + pageSize);
-    $('.rt-list').innerHTML = rows.length ? rows.map(function(r, index) {
-        var sub = '#' + r.id + (tab === 'favorites' ? ' · ' + labels[r.kind] : '') + (runtime.alias(r) && runtime.prefs.english ? ' · ' + r.original : '') + (runtime.changed(r) ? ' · modifié' : '');
-        return '<li class="rt-row' + (selected && selected.key === r.key ? ' rt-selected' : '') + '"><button type="button" class="rt-select" data-action="select" data-index="' + (start + index) + '" aria-pressed="' + !!(selected && selected.key === r.key) + '">' + (r.data && typeof r.data.iconIndex === 'number' ? '<canvas class="rt-icon" width="32" height="32" data-icon="' + Number(r.data.iconIndex) + '" aria-hidden="true"></canvas>' : '') + '<span class="rt-row-main"><span class="rt-row-title">' + esc(runtime.title(r)) + '</span><span class="rt-row-sub">' + esc(sub) + '</span></span><span class="rt-row-value">' + esc(rowValue(r)) + '</span></button><button class="rt-star" type="button" data-action="star" data-index="' + (start + index) + '" aria-label="Favori : ' + esc(runtime.title(r)) + '" aria-pressed="' + !!runtime.prefs.favorites[r.key] + '">' + (runtime.prefs.favorites[r.key] ? '★' : '☆') + '</button></li>';
-    }).join('') : '<li>' + empty('Aucun résultat', query || filter !== 'all' ? 'Essayez un autre nom, un ID ou le filtre « Tout afficher ».' : 'Aucune entrée dans cette catégorie.') + '</li>';
-    $('#rt-count').textContent = found.length ? (start + 1) + '–' + (start + rows.length) + ' sur ' + found.length.toLocaleString() : '0 résultat';
-    $('[data-action="prev"]').disabled = page === 0;
-    $('[data-action="next"]').disabled = start + pageSize >= found.length;
-    paintIcons();
+    if (filter === 'value') found = found.filter(function(r) { return String(runtime.value(r)) === exactValue; });
+    page = Math.max(0, Math.min(page, Math.ceil(found.length/pageSize)-1));
+    var start = page*pageSize, rows = found.slice(start,start+pageSize);
+    $('.rt-list').innerHTML = rows.length ? rows.map(function(r,i) {
+        var index = start+i, v = runtime.value(r), edit = runtime.editable(r), frozen = runtime.isFrozen(r), name = runtime.title(r), quick = '';
+        if (edit && typeof v === 'number') quick = rowAction('−99','minus99',index,'Retirer 99 : '+name) + rowAction('+99','plus99',index,'Ajouter 99 : '+name);
+        else if (edit && typeof v === 'boolean') quick = rowAction(v ? 'false' : 'true','toggle-bool',index,'Basculer : '+name);
+        return '<li class="rt-row' + (frozen ? ' rt-frozen' : '') + '"><label class="rt-row-check"><input type="checkbox" data-check-index="' + index + '" aria-label="Sélectionner : ' + esc(name) + '"' + (checked[r.key] ? ' checked' : '') + '></label><button type="button" class="rt-select" data-action="select" data-index="' + index + '" title="' + esc(name+' · #'+r.id) + '"><span class="rt-row-id">#' + esc(r.id) + '</span><span class="rt-row-title">' + esc(name) + '</span></button><span class="rt-row-value" title="' + esc(String(v)) + '">' + esc(typeof v === 'boolean' ? String(v) : rowValue(r)) + '</span><div class="rt-row-actions">' + quick + rowAction(runtime.prefs.favorites[r.key] ? '★' : '☆','star',index,'Favori : '+name,!!runtime.prefs.favorites[r.key]) + rowAction(lockIcon(frozen),'freeze',index,(frozen?'Libérer : ':'Figer : ')+name,frozen,!edit) + rowAction('✎','select',index,'Éditer : '+name) + '</div></li>';
+    }).join('') : '<li class="rt-empty">Aucun résultat. Changez la recherche ou le filtre.</li>';
+    $('#rt-count').textContent = found.length ? (start+1)+'–'+(start+rows.length)+' / '+found.length.toLocaleString() : '0 résultat';
+    $('#rt-page-number').value = page+1; $('#rt-page-number').max = Math.max(1,Math.ceil(found.length/pageSize));
+    $('#rt-page-total').textContent = '/ '+Math.max(1,Math.ceil(found.length/pageSize));
+    $('[data-action="prev"]').disabled = page===0; $('[data-action="next"]').disabled = start+pageSize>=found.length;
+    updateSelection();
 }
 function paintIcons() {
     if (!g.ImageManager || !g.ImageManager.loadSystem) return;
@@ -509,16 +628,15 @@ function actorOptions() {
 }
 function actorTarget() { return '<label class="rt-field"><span>Acteur</span><select id="rt-actor-target">' + actorOptions() + '</select></label><p class="rt-muted rt-small" id="rt-actor-context"></p>'; }
 function renderDetail() {
-    var detail = $('.rt-detail'); if (!detail) return;
+    var detail = $('.rt-detail'); if (!detail || modalMode !== 'edit') return;
     if (!selected) { detail.innerHTML = empty('Choisissez une entrée', 'Consultez son nom d’origine, sa valeur et ses commandes ici.'); return; }
     var r = selected, kind = r.kind, v = runtime.value(r);
-    var html = button('‹ Retour aux résultats', 'back-results', 'rt-back') + '<span class="rt-id">' + esc(labels[kind]) + ' · #' + esc(r.id) + '</span><h3>' + esc(runtime.title(r)) + '</h3><p class="rt-muted rt-small">Nom d’origine : ' + esc(r.original || '(sans nom)') + '</p>';
+    var html = '<span class="rt-id">' + esc(labels[kind]) + ' · #' + esc(r.id) + '</span><h3>' + esc(runtime.title(r)) + '</h3><p class="rt-muted rt-small">Nom d’origine : ' + esc(r.original || '(sans nom)') + '</p>';
     if (r.data && r.data.description) html += '<p class="rt-small">' + esc(r.data.description) + '</p>';
     html += '<div class="rt-divider"></div>';
     if (kind === 'variables') {
-        if (typeof v === 'number' || typeof v === 'string') {
-            html += '<form data-form="variable"><label class="rt-field"><span>Type de valeur</span><select id="rt-value-type"><option value="number"' + (typeof v === 'number' ? ' selected' : '') + '>Nombre entier</option><option value="string"' + (typeof v === 'string' ? ' selected' : '') + '>Texte</option></select></label><label class="rt-field"><span>Valeur actuelle → nouvelle valeur</span><textarea id="rt-value" maxlength="10000">' + esc(v) + '</textarea></label><button class="rt-primary rt-full" type="submit">Appliquer la valeur</button></form><p class="rt-muted rt-small" style="margin-top:10px">Les événements peuvent changer cette valeur à la reprise du jeu.</p>';
-        } else html += '<p>Type complexe, en lecture seule.</p><pre>' + esc(runtime.printable(v)) + '</pre>';
+        if (runtime.editable(r)) html += valueForm(v, 'variable');
+        else html += '<p>Type complexe, en lecture seule.</p><pre>' + esc(runtime.printable(v)) + '</pre>';
     } else if (kind === 'switches' || kind === 'selfSwitches') {
         html += '<p>État actuel : <strong>' + (v ? 'ON · activé' : 'OFF · désactivé') + '</strong></p><div class="rt-actions">' + button('Activer ON', 'switch-on', v ? '' : 'rt-primary') + button('Désactiver OFF', 'switch-off', v ? 'rt-primary' : '') + '</div>';
     } else if (/^(items|weapons|armors)$/.test(kind)) {
@@ -530,8 +648,23 @@ function renderDetail() {
     else if (kind === 'skills' || kind === 'states') html += actorTarget() + '<div class="rt-actions">' + button(kind === 'skills' ? 'Apprendre' : 'Ajouter l’état', kind === 'skills' ? 'learn' : 'add-state', 'rt-primary') + button(kind === 'skills' ? 'Oublier' : 'Retirer l’état', kind === 'skills' ? 'forget' : 'remove-state') + '</div><p class="rt-muted rt-small" style="margin-top:12px">Ces actions respectent les règles du moteur et réinitialisent l’annulation.</p>';
     html += '<div class="rt-divider"></div><form data-form="alias">' + field('Nom anglais · affichage uniquement', 'rt-alias', runtime.alias(r), 'text', 'maxlength="2000" placeholder="Saisir une traduction…"') + '<div class="rt-actions"><button type="submit">Enregistrer le nom</button>' + button('Traduire en ligne', 'translate-one') + '</div></form>';
     detail.innerHTML = html;
-    renderActorContext();
+    updateValueInput(); renderActorContext();
 }
+
+function valueForm(value, form) {
+    var type = typeof value === 'boolean' ? 'boolean' : typeof value === 'string' && form !== 'bulk' ? 'string' : 'number';
+    return '<form data-form="' + form + '"><label class="rt-field"><span>Type</span><select id="rt-value-type"><option value="number"' + (type==='number'?' selected':'') + '>Int · nombre entier</option><option value="boolean"' + (type==='boolean'?' selected':'') + '>Bool · true / false</option><option value="string"' + (type==='string'?' selected':'') + '>Texte</option></select></label><label class="rt-field" id="rt-value-wrap"><span>Nouvelle valeur</span><textarea id="rt-value" maxlength="10000">' + esc(value) + '</textarea></label><label class="rt-field" id="rt-bool-wrap" hidden><span>Nouvelle valeur</span><select id="rt-bool"><option value="true"' + (value===true?' selected':'') + '>true</option><option value="false"' + (value!==true?' selected':'') + '>false</option></select></label><button class="rt-primary rt-full" type="submit">' + (form==='bulk'?'Appliquer à la sélection':'Appliquer la valeur') + '</button></form>';
+}
+function updateValueInput() {
+    if (!$('#rt-value-type')) return;
+    var bool = $('#rt-value-type').value === 'boolean'; $('#rt-value-wrap').hidden = bool; $('#rt-bool-wrap').hidden = !bool;
+    $('#rt-value').setAttribute('inputmode',$('#rt-value-type').value==='number'?'numeric':'text');
+}
+function readValueInput() {
+    var type = $('#rt-value-type').value;
+    return type === 'boolean' ? $('#rt-bool').value === 'true' : type === 'number' ? runtime.integer($('#rt-value').value,-9007199254740991,9007199254740991) : $('#rt-value').value;
+}
+
 function actorEditor(r) {
     var a = runtime.actor(r.id), html = '<p class="rt-muted rt-small">Nom en partie : ' + esc(a.name()) + '</p>';
     html += '<form data-form="actor-stat"><label class="rt-field"><span>Statistique à modifier</span><select id="rt-stat"><option value="hp">HP · ' + a.hp + '/' + a.mhp + '</option><option value="mp">MP · ' + a.mp + '/' + a.mmp + '</option><option value="tp">TP · ' + a.tp + '/' + a.maxTp() + '</option><option value="level">Niveau · ' + a.level + '/' + a.maxLevel() + '</option><option value="exp">EXP · ' + a.currentExp() + '</option></select></label>' + field('Nouvelle valeur', 'rt-stat-value', a.hp, 'number', 'min="0" step="1" required') + '<button type="submit" class="rt-primary rt-full">Appliquer à cet acteur</button></form>' + button('Soigner complètement', 'recover', 'rt-full') + '<div class="rt-note">Les commandes d’acteur peuvent affecter plusieurs statistiques. Elles réinitialisent la pile d’annulation.</div><h4>Équipement porté</h4>';
@@ -548,7 +681,7 @@ function renderActorContext() {
     $('#rt-actor-context').textContent = text;
 }
 function renderParty() {
-    $('.rt-main').innerHTML = '<div class="rt-page"><h2>Partie</h2><p class="rt-muted">' + esc(g.$dataSystem.gameTitle) + ' · ' + esc(g.Utils.RPGMAKER_NAME) + ' ' + esc(g.Utils.RPGMAKER_VERSION) + '</p><div class="rt-stats"><div class="rt-stat"><span class="rt-muted rt-small">OR</span><strong>' + g.$gameParty.gold().toLocaleString() + '</strong></div><div class="rt-stat"><span class="rt-muted rt-small">CARTE</span><strong>#' + g.$gameMap.mapId() + '</strong></div><div class="rt-stat"><span class="rt-muted rt-small">POSITION</span><strong>' + g.$gamePlayer.x + ', ' + g.$gamePlayer.y + '</strong></div></div><form data-form="gold"><h3>Argent de la partie</h3>' + field('Nouveau total (' + g.$dataSystem.currencyUnit + ')', 'rt-gold', g.$gameParty.gold(), 'number', 'min="0" max="' + g.$gameParty.maxGold() + '" step="1" required') + '<button class="rt-primary" type="submit">Définir le total</button></form><div class="rt-divider"></div><section><h3>Sauvegarde</h3><p class="rt-muted">Les modifications sont appliquées à la partie en cours. Utilisez la sauvegarde du jeu pour les conserver.</p>' + button('Ouvrir le menu de sauvegarde', 'save-menu') + '<div class="rt-note">Enregistrez dans un emplacement distinct si vous souhaitez garder votre progression précédente.</div></section></div>';
+    $('.rt-modal-content').innerHTML = '<div class="rt-page"><h2>Partie</h2><p class="rt-muted">' + esc(g.$dataSystem.gameTitle) + ' · ' + esc(g.Utils.RPGMAKER_NAME) + ' ' + esc(g.Utils.RPGMAKER_VERSION) + '</p><div class="rt-stats"><div class="rt-stat"><span class="rt-muted rt-small">OR</span><strong>' + g.$gameParty.gold().toLocaleString() + '</strong></div><div class="rt-stat"><span class="rt-muted rt-small">CARTE</span><strong>#' + g.$gameMap.mapId() + '</strong></div><div class="rt-stat"><span class="rt-muted rt-small">POSITION</span><strong>' + g.$gamePlayer.x + ', ' + g.$gamePlayer.y + '</strong></div></div><form data-form="gold"><h3>Argent de la partie</h3>' + field('Nouveau total (' + g.$dataSystem.currencyUnit + ')', 'rt-gold', g.$gameParty.gold(), 'number', 'min="0" max="' + g.$gameParty.maxGold() + '" step="1" required') + '<button class="rt-primary" type="submit">Définir le total</button></form><div class="rt-divider"></div><section><h3>Sauvegarde</h3><p class="rt-muted">Les modifications sont appliquées à la partie en cours. Utilisez la sauvegarde du jeu pour les conserver.</p>' + button('Ouvrir le menu de sauvegarde', 'save-menu') + '<div class="rt-note">Enregistrez dans un emplacement distinct si vous souhaitez garder votre progression précédente.</div></section></div>';
 }
 function sourceSelector() {
     var languages = { ja: 'Japonais', fr: 'Français', 'zh-CN': 'Chinois simplifié', 'zh-TW': 'Chinois traditionnel', ko: 'Coréen', ru: 'Russe', es: 'Espagnol', de: 'Allemand', it: 'Italien', pt: 'Portugais', en: 'Anglais' };
@@ -556,21 +689,21 @@ function sourceSelector() {
 }
 var pendingTranslations = [];
 function renderTranslations() {
-    $('.rt-main').innerHTML = '<div class="rt-page"><h2>Traductions anglaises</h2><p class="rt-muted">Un nom plus clair, avec les données d’origine intactes.</p><section><div class="rt-note">Les traductions changent uniquement les noms affichés dans le Toolkit. Elles ne modifient ni les identifiants, ni les valeurs, ni les textes du jeu.</div><h3>Traduction à la demande</h3>' + sourceSelector() + '<p class="rt-small rt-muted">Le bouton ci-dessous envoie les noms sélectionnés à MyMemory (service tiers) pour les traduire en anglais. Les valeurs des variables ne sont pas envoyées. Le service gratuit sans clé est soumis à un quota ; réseau et autorisation CORS nécessaires.</p><p id="rt-translation-count">' + pendingTranslations.length + ' nom(s) sélectionné(s), déjà traduits exclus automatiquement.</p><div class="rt-actions">' + button('Envoyer les noms à MyMemory', 'translate-start', 'rt-primary') + button('Arrêter', 'translate-stop') + '</div><p id="rt-translation-progress" class="rt-small" role="status" style="margin-top:12px"></p><div class="rt-divider"></div><h3>Dictionnaire local</h3><p class="rt-muted">' + Object.keys(runtime.prefs.aliases).length + ' alias enregistré(s) pour ce jeu. Saisissez un nom anglais dans les détails d’une entrée ou importez un dictionnaire JSON.</p><div class="rt-actions">' + button('Exporter les traductions', 'export-aliases') + button('Exporter les noms à traduire', 'export-names') + '</div><label class="rt-field" style="margin-top:16px"><span>Importer un dictionnaire JSON (5 Mo maximum)</span><input id="rt-import" type="file" accept=".json,application/json"></label><p class="rt-small rt-muted">L’import ne retient que les entrées dont la catégorie, l’ID et le nom d’origine correspondent. Les fichiers ne sont pas envoyés à un serveur.</p></section></div>';
+    $('.rt-modal-content').innerHTML = '<div class="rt-page"><h2>Traductions anglaises</h2><label class="rt-checkbox"><input id="rt-english" type="checkbox"' + (runtime.prefs.english ? ' checked' : '') + '>Afficher les noms anglais</label><p class="rt-muted">Un nom plus clair, avec les données d’origine intactes.</p><section><div class="rt-note">Les traductions changent uniquement les noms affichés dans le Toolkit. Elles ne modifient ni les identifiants, ni les valeurs, ni les textes du jeu.</div><h3>Traduction à la demande</h3>' + sourceSelector() + '<p class="rt-small rt-muted">Le bouton ci-dessous envoie les noms sélectionnés à MyMemory (service tiers) pour les traduire en anglais. Les valeurs des variables ne sont pas envoyées. Le service gratuit sans clé est soumis à un quota ; réseau et autorisation CORS nécessaires.</p><p id="rt-translation-count">' + pendingTranslations.length + ' nom(s) sélectionné(s), déjà traduits exclus automatiquement.</p><div class="rt-actions">' + button('Envoyer les noms à MyMemory', 'translate-start', 'rt-primary') + button('Arrêter', 'translate-stop') + '</div><p id="rt-translation-progress" class="rt-small" role="status" style="margin-top:12px"></p><div class="rt-divider"></div><h3>Dictionnaire local</h3><p class="rt-muted">' + Object.keys(runtime.prefs.aliases).length + ' alias enregistré(s) pour ce jeu. Saisissez un nom anglais dans les détails d’une entrée ou importez un dictionnaire JSON.</p><div class="rt-actions">' + button('Exporter les traductions', 'export-aliases') + button('Exporter les noms à traduire', 'export-names') + '</div><label class="rt-field" style="margin-top:16px"><span>Importer un dictionnaire JSON (5 Mo maximum)</span><input id="rt-import" type="file" accept=".json,application/json"></label><p class="rt-small rt-muted">L’import ne retient que les entrées dont la catégorie, l’ID et le nom d’origine correspondent. Les fichiers ne sont pas envoyés à un serveur.</p></section></div>';
     $('[data-action="translate-start"]').disabled = !pendingTranslations.length || translator.busy();
     $('[data-action="translate-stop"]').disabled = !translator.busy();
 }
 function renderHistory() {
-    $('.rt-main').innerHTML = '<div class="rt-page"><h2>Historique de cette session</h2><p class="rt-muted">100 dernières opérations. Annulation et rétablissement limités à 80 modifications simples. Le chargement d’une partie réinitialise cet historique.</p>' + (runtime.log().length ? runtime.log().map(function(entry) { return '<div class="rt-log-entry"><span class="rt-muted rt-small">' + esc(entry.time) + ' · ' + (entry.reversible ? 'Modification simple' : 'Opération') + '</span><strong>' + esc(entry.label) + '</strong><code>' + esc(entry.before) + ' → ' + esc(entry.after) + '</code></div>'; }).join('') : empty('Aucune modification', 'Les opérations effectuées depuis ce panneau apparaîtront ici.')) + '</div>';
+    $('.rt-modal-content').innerHTML = '<div class="rt-page">' + button('Annuler', 'undo') + button('Rétablir', 'redo') + button('Créer un repère', 'baseline') + '<h2>Historique de cette session</h2><p class="rt-muted">100 dernières opérations. Annulation et rétablissement limités à 80 modifications simples. Le chargement d’une partie réinitialise cet historique.</p>' + (runtime.log().length ? runtime.log().map(function(entry) { return '<div class="rt-log-entry"><span class="rt-muted rt-small">' + esc(entry.time) + ' · ' + (entry.reversible ? 'Modification simple' : 'Opération') + '</span><strong>' + esc(entry.label) + '</strong><code>' + esc(entry.before) + ' → ' + esc(entry.after) + '</code></div>'; }).join('') : empty('Aucune modification', 'Les opérations effectuées depuis ce panneau apparaîtront ici.')) + '</div>';
 }
-function updateHistoryButtons() { $('[data-action="undo"]').disabled = !runtime.canUndo(); $('[data-action="redo"]').disabled = !runtime.canRedo(); }
+function updateHistoryButtons() { if ($('[data-action="undo"]')) $('[data-action="undo"]').disabled = !runtime.canUndo(); if ($('[data-action="redo"]')) $('[data-action="redo"]').disabled = !runtime.canRedo(); }
 function changed(message, actorChange) {
-    dirty = true; updateHistoryButtons(); renderList(); renderDetail(); if (tab === 'party') renderParty();
+    dirty = true; updateHistoryButtons(); renderList(); renderDetail(); if (modalMode === 'party') renderParty();
     say(message + (actorChange ? ' · Pile d’annulation réinitialisée.' : ''));
 }
 function translateChoice(records) {
     pendingTranslations = records.filter(function(r) { return r.original.trim() && !runtime.alias(r); });
-    tab = 'translations'; render();
+    openModal('translations', 'Traduction'); renderTranslations();
 }
 function startTranslation() {
     if (!pendingTranslations.length) { say('Sélectionnez une entrée ou une page à traduire.'); return; }
@@ -579,9 +712,9 @@ function startTranslation() {
         if ($('#rt-translation-progress')) $('#rt-translation-progress').textContent = done + ' / ' + total + ' noms traduits';
         say(done + ' / ' + total + ' noms traduits');
     }).then(function(count) {
-        pendingTranslations = []; if (opened && tab === 'translations') renderTranslations();
+        pendingTranslations = []; if (opened && modalMode === 'translations') renderTranslations();
         if (opened) say(count + ' nom(s) traduit(s).' + (runtime.storageWarning() ? ' Stockage local indisponible : exportez le dictionnaire.' : ''));
-    }).catch(function(e) { if (opened) { if (tab === 'translations') renderTranslations(); say(e.message, true); } });
+    }).catch(function(e) { if (opened) { if (modalMode === 'translations') renderTranslations(); say(e.message, true); } });
     renderTranslations();
 }
 function download(name, data) {
@@ -596,7 +729,7 @@ function importFile(file) {
     reader.onload = function() { guarded(function() {
         if (g.$gameVariables !== session) throw new Error('La partie a changé. Relancez l’import.');
         var result = runtime.importAliases(JSON.parse(reader.result.replace(/^\uFEFF/, '')));
-        if (opened && tab === 'translations') renderTranslations();
+        if (opened && modalMode === 'translations') renderTranslations();
         say(result.imported + ' traduction(s) importée(s), ' + result.skipped + ' ignorée(s).' + (runtime.storageWarning() ? ' Exportez le dictionnaire : le stockage local est indisponible.' : ''));
     }); };
     reader.onerror = function() { say('Impossible de lire ce fichier.', true); };
@@ -604,15 +737,27 @@ function importFile(file) {
 }
 function act(action, node) {
     var r, id;
+    if (action === 'modal-close' || action === 'back-results') { closeModal(); return; }
+    if (action === 'select') { selected = found[Number(node.getAttribute('data-index'))]; openModal('edit', 'Éditer · #' + selected.id); $('.rt-modal-content').innerHTML = '<div class="rt-detail"></div>'; renderDetail(); return; }
+    if (action === 'clear-selection') { checked = {}; renderList(); return; }
+    if (action === 'translate-selection') { translateChoice(picked().length ? picked() : found.slice(page*pageSize,(page+1)*pageSize)); return; }
+    if (action === 'bulk-edit') { openModal('bulk', 'Modifier ' + picked().length + ' entrées'); $('.rt-modal-content').innerHTML = '<p>La valeur sera appliquée à toute la sélection, y compris sur les autres pages. Un type incompatible annule le groupe entier.</p>' + valueForm('', 'bulk') + '<p class="rt-small rt-muted">Maximum : 500 entrées. Les gels existants suivront la nouvelle valeur.</p>'; updateValueInput(); return; }
+    if (action === 'bulk-freeze' || action === 'bulk-unfreeze') { var count = runtime.freezeMany(picked(),action === 'bulk-freeze'); renderList(); say(count + (action === 'bulk-freeze' ? ' valeurs figées pour cette session.' : ' valeurs libérées.')); return; }
+    if (/^(minus99|plus99|toggle-bool|freeze)$/.test(action)) {
+        r = found[Number(node.getAttribute('data-index'))];
+        if (action === 'freeze') { runtime.freezeMany([r],!runtime.isFrozen(r)); renderList(); say(runtime.isFrozen(r) ? 'Valeur figée pendant cette session.' : 'Valeur libérée.'); return; }
+        var v = runtime.value(r), next;
+        if (action === 'toggle-bool') next = !v;
+        else { next = v + (action === 'minus99' ? -99 : 99); if (/^(items|weapons|armors)$/.test(r.kind)) next = Math.max(0,Math.min(g.$gameParty.maxItems(r.data),next)); }
+        runtime.setValue(r,next); changed('Valeur : ' + String(runtime.value(r))); return;
+    }
     if (action === 'close') { closeToolkit(); return; }
     if (action === 'tab') { tab = node.getAttribute('data-tab'); page = 0; query = ''; filter = 'all'; selected = null; render(); return; }
-    if (action === 'back-results') { root.classList.remove('rt-detail-open'); var row = $('.rt-selected .rt-select'); if (row) row.focus(); return; }
-    if (action === 'select') { root.classList.add('rt-detail-open'); selected = found[Number(node.getAttribute('data-index'))]; renderList(); renderDetail(); var chosen = mobileLayout() ? $('.rt-back') : $('.rt-detail input, .rt-detail select, .rt-detail textarea, .rt-detail button'); if (chosen) chosen.focus(); return; }
     if (action === 'star') { r = found[Number(node.getAttribute('data-index'))]; runtime.prefs.favorites[r.key] = !runtime.prefs.favorites[r.key]; runtime.savePrefs(); renderNav(); renderList(); if (runtime.storageWarning()) say('Favori conservé en mémoire seulement : stockage local indisponible.', true); return; }
     if (action === 'prev' || action === 'next') { page += action === 'next' ? 1 : -1; renderList(); $('.rt-list').scrollTop = 0; $('[data-action="' + action + '"]').focus(); return; }
     if (action === 'baseline') { say(runtime.capture() + ' valeurs mémorisées. Reprenez le jeu, puis utilisez le filtre « Changé depuis le repère ».'); renderList(); return; }
     if (action === 'refresh') { var key = selected && selected.key; runtime.refresh(); selected = key ? runtime.list(selected.kind).filter(function(x) { return x.key === key; })[0] || null : null; render(); say('Données actualisées.'); return; }
-    if (action === 'undo' || action === 'redo') { runtime[action](); changed(action === 'undo' ? 'Modification annulée.' : 'Modification rétablie.'); if (tab === 'history') renderHistory(); return; }
+    if (action === 'undo' || action === 'redo') { runtime[action](); changed(action === 'undo' ? 'Modification annulée.' : 'Modification rétablie.'); if (modalMode === 'history') renderHistory(); return; }
     if (action === 'translate-page') { translateChoice(found.slice(page * pageSize, (page + 1) * pageSize)); return; }
     if (action === 'translate-one') { translateChoice([selected]); return; }
     if (action === 'translate-start') { startTranslation(); return; }
@@ -639,8 +784,9 @@ function act(action, node) {
     }
 }
 function submit(form) {
+    if (form === 'bulk') { var count = runtime.setMany(picked(),readValueInput()); changed(count + ' entrées modifiées.'); closeModal(); return; }
     if (form === 'variable') {
-        var next = $('#rt-value-type').value === 'number' ? runtime.integer($('#rt-value').value, -9007199254740991, 9007199254740991) : $('#rt-value').value;
+        var next = readValueInput();
         runtime.setValue(selected, next); changed('Valeur actuelle : ' + runtime.printable(runtime.value(selected)) + '.');
     }
     if (form === 'quantity') { runtime.setValue(selected, $('#rt-quantity').value); changed('Quantité actuelle : ' + runtime.value(selected) + '.'); }
@@ -653,7 +799,7 @@ function openToolkit() {
     if (!allowed()) return false;
     try {
         if (!runtime) { var storage; try { storage = g.localStorage; } catch (e) { storage = { getItem: function() { return null; }, setItem: function() { throw new Error('Stockage indisponible'); } }; } runtime = createToolkitRuntime(g, storage); translator = createToolkitTranslator(runtime, g); }
-        runtime.refresh(); selected = null;
+        runtime.refresh(); selected = null; checked = {}; 
         buildRoot(); previousFocus = document.activeElement; openScene = g.SceneManager._scene;
         openVariables = g.$gameVariables; opened = true; root.hidden = false; if (launch) launch.hidden = true;
         clearInput(); render();
@@ -670,12 +816,12 @@ function refreshSceneWindows() {
 }
 function closeToolkit() {
     if (!opened) return;
-    opened = false; clearTimeout(searchTimer); if (translator) translator.cancel(); root.hidden = true;
+    closeModal(); opened = false; clearTimeout(searchTimer); if (translator) translator.cancel(); root.hidden = true;
     clearInput(); refreshSceneWindows();
     if (previousFocus && document.contains(previousFocus)) previousFocus.focus();
 }
 function toggleToolkit() { return opened ? closeToolkit() : openToolkit(); }
-g.RPGMToolkit = { version: '1.1.0', open: openToolkit, close: closeToolkit, toggle: toggleToolkit, isOpen: function() { return opened; } };
+g.RPGMToolkit = { version: '1.2.0', open: openToolkit, close: closeToolkit, toggle: toggleToolkit, isOpen: function() { return opened; } };
 var heldCloseKey = null;
 g.addEventListener('keydown', function(event) {
     var key = event.key || ({ 117: 'F6', 118: 'F7', 121: 'F10', 27: 'Escape' }[event.keyCode]);
@@ -684,16 +830,16 @@ g.addEventListener('keydown', function(event) {
         if (opened || allowed()) { event.preventDefault(); event.stopImmediatePropagation(); heldCloseKey = key; if (!event.repeat) toggleToolkit(); } return;
     }
     if (!opened) return;
-    if (key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); heldCloseKey = key; if (mobileLayout() && root.classList.contains('rt-detail-open')) { root.classList.remove('rt-detail-open'); var row = $('.rt-selected .rt-select'); if (row) row.focus(); } else closeToolkit(); return; }
-    if ((event.ctrlKey || event.metaKey) && (key === 'f' || key === 'F')) { event.preventDefault(); event.stopImmediatePropagation(); if ($('#rt-search')) $('#rt-search').focus(); return; }
+    if (key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); heldCloseKey = key; if (modalMode) closeModal(); else closeToolkit(); return; }
+    if ((event.ctrlKey || event.metaKey) && (key === 'f' || key === 'F')) { event.preventDefault(); event.stopImmediatePropagation(); if (!modalMode && $('#rt-search')) $('#rt-search').focus(); return; }
     if (key === 'Tab') {
-        var focusables = Array.prototype.slice.call(root.querySelectorAll('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href]')).filter(function(el) { return el.offsetWidth || el.offsetHeight; });
+        var focusables = Array.prototype.slice.call((modalMode ? $('.rt-modal') : $('.rt-panel')).querySelectorAll('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href]')).filter(function(el) { return el.offsetWidth || el.offsetHeight; });
         if (!focusables.length) return;
         var first = focusables[0], last = focusables[focusables.length - 1];
         if (event.shiftKey && (document.activeElement === first || focusables.indexOf(document.activeElement) < 0)) { event.preventDefault(); last.focus(); }
         else if (!event.shiftKey && (document.activeElement === last || focusables.indexOf(document.activeElement) < 0)) { event.preventDefault(); first.focus(); }
     }
-    if (!root.contains(event.target)) { event.stopImmediatePropagation(); event.preventDefault(); $('.rt-panel').focus(); }
+    if (!root.contains(event.target)) { event.stopImmediatePropagation(); event.preventDefault(); (modalMode ? $('.rt-modal-dialog') : $('.rt-panel')).focus(); }
 }, true);
 g.addEventListener('keyup', function(event) {
     if (heldCloseKey && event.key === heldCloseKey) { event.stopImmediatePropagation(); heldCloseKey = null; }
@@ -712,7 +858,8 @@ var originalUpdateScene = g.SceneManager.updateScene;
 g.SceneManager.updateScene = function() {
     if (opened && (this._scene !== openScene || g.$gameVariables !== openVariables || this.isSceneChanging())) closeToolkit();
     if (launch) { var hidden = opened || !allowed(); if (launch.hidden !== hidden) launch.hidden = hidden; }
-    if (!opened) return originalUpdateScene.apply(this, arguments);
+    if (runtime) runtime.enforceFrozen();
+    if (!opened) { var result = originalUpdateScene.apply(this, arguments); if (runtime) runtime.enforceFrozen(); return result; }
 };
 function openFromInterpreter() { if (openToolkit() && this && this.setWaitMode) this.setWaitMode('rpgmToolkit'); }
 if (g.PluginManager.registerCommand) { g.PluginManager.registerCommand('RPGMToolkit', 'Open', openFromInterpreter); g.PluginManager.registerCommand('RPGMToolkit', 'Close', closeToolkit); }

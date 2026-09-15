@@ -4,7 +4,8 @@ var hotkey = /^(F6|F7|F10)$/.test(toolkitParams.Hotkey || '') ? toolkitParams.Ho
 var pageSize = Math.max(20, Math.min(80, Number(toolkitParams.PageSize) || 60));
 var runtime, translator, root, launch, previousFocus, openScene, openVariables, searchTimer;
 var opened = false, dirty = false, tab = 'variables', query = '', filter = 'all', page = 0, selected = null, found = [];
-var chosenActor = '';
+var chosenActor = '', checked = {}, modalMode = '', modalFocus = null, exactValue = '';
+function picked() { return Object.keys(checked).map(function(k) { return checked[k]; }); }
 var labels = { favorites: 'Favoris', variables: 'Variables', switches: 'Interrupteurs', selfSwitches: 'Interr. locaux', items: 'Objets', weapons: 'Armes', armors: 'Armures', actors: 'Acteurs', skills: 'Compétences', states: 'États', party: 'Partie', translations: 'Traductions', history: 'Historique' };
 var hints = { variables: 'Retrouvez et modifiez les valeurs de votre partie.', switches: 'Contrôlez les interrupteurs globaux du jeu.', selfSwitches: 'Interrupteurs A–D des événements de la carte actuelle.', items: 'Objets usuels, objets clés et objets masqués.', weapons: 'Recherchez une arme et ajustez votre inventaire.', armors: 'Armures, accessoires et équipements.', actors: 'Statistiques, progression et équipement des acteurs.', skills: 'Apprenez ou retirez une compétence à un acteur.', states: 'Ajoutez ou retirez les états d’un acteur.', favorites: 'Vos entrées épinglées, réunies au même endroit.' };
 function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function(c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
@@ -12,7 +13,7 @@ function $(selector) { return root.querySelector(selector); }
 function button(text, action, cls) { return '<button type="button" data-action="' + action + '" class="' + (cls || '') + '">' + text + '</button>'; }
 function field(label, id, value, type, attrs) { return '<label class="rt-field"><span>' + esc(label) + '</span><input id="' + id + '" type="' + (type || 'text') + '" value="' + esc(value) + '" ' + (attrs || '') + '></label>'; }
 function empty(title, description) { return '<div class="rt-empty"><span class="rt-empty-symbol" aria-hidden="true">◇</span><strong>' + esc(title) + '</strong>' + esc(description) + '</div>'; }
-function say(message, error) { if (root) { $('.rt-status').textContent = message; $('.rt-status').className = 'rt-status' + (error ? ' rt-error' : ''); } }
+function say(message, error) { if (root) { if (modalMode) { $('.rt-modal-status').textContent = message; $('.rt-modal-status').className = 'rt-modal-status' + (error ? ' rt-error' : ''); } $('.rt-status').textContent = message; $('.rt-status').className = 'rt-status' + (error ? ' rt-error' : ''); } }
 function guarded(fn) { try { return fn(); } catch (e) { say(e.message || String(e), true); return undefined; } }
 function clearInput() { if (g.Input) g.Input.clear(); if (g.TouchInput) g.TouchInput.clear(); if (g.$gameTemp && g.$gameTemp.clearDestination) g.$gameTemp.clearDestination(); }
 function allowed() {
@@ -44,7 +45,12 @@ function buildRoot() {
     var style = document.createElement('style'); style.id = 'rpgm-toolkit-style'; style.textContent = TOOLKIT_CSS; document.head.appendChild(style);
     root = document.createElement('div'); root.className = 'rt'; root.id = 'rpgm-toolkit'; root.hidden = true;
     root.setAttribute('lang', 'fr');
-    root.innerHTML = '<section class="rt-panel" role="dialog" aria-modal="true" aria-labelledby="rt-heading" tabindex="-1"><header class="rt-header"><div class="rt-brand"><span class="rt-logo" aria-hidden="true">R</span><div><div class="rt-eyebrow">RPG MAKER · TOOLKIT</div><h1 id="rt-heading">RPGM Toolkit</h1></div></div><div class="rt-header-actions"><span class="rt-paused">Ⅱ Jeu en pause</span>' + button('↶ Annuler', 'undo') + button('↷ Rétablir', 'redo') + button('Fermer <kbd>' + hotkey + '</kbd>', 'close') + '</div></header><div class="rt-body"><nav class="rt-nav" aria-label="Catégories"></nav><main class="rt-main"></main></div><footer class="rt-footer"><div class="rt-status" role="status" aria-live="polite"></div><span class="rt-footer-hint"><kbd>Ctrl F</kbd> Rechercher · <kbd>Échap</kbd> Fermer</span></footer></section>';
+    root.innerHTML = '<section class="rt-panel" role="dialog" aria-modal="true" aria-label="RPGM Toolkit" tabindex="-1"><header class="rt-header"><div class="rt-search-line"><label class="rt-search"><span class="rt-sr">Rechercher par nom, ID ou valeur</span><input id="rt-search" type="search" placeholder="Rechercher · nom, #ID, value:42" autocomplete="off"></label>' + button('✕', 'close', 'rt-close') + '</div><div class="rt-filter-line"><label><span class="rt-sr">Catégorie</span><select id="rt-category"></select></label><label><span class="rt-sr">Filtrer les entrées</span><select id="rt-filter"><option value="all">Tous les types</option><option value="int">Int · entiers</option><option value="bool">Bool · true/false</option><option value="text">Texte</option><option value="value">Valeur exacte…</option><option value="favorites">Favoris</option><option value="frozen">Figés</option><option value="named">Avec un nom</option><option value="active">Non nul / possédé</option><option value="changed">Modifiés</option></select></label><label id="rt-exact-wrap" hidden><span class="rt-sr">Valeur exacte</span><input id="rt-exact" placeholder="Valeur" type="text"></label></div></header><main class="rt-main"><div class="rt-bulkbar"><label class="rt-page-check"><input id="rt-select-page" type="checkbox" aria-label="Sélectionner cette page"><span id="rt-selection-count">Sélection</span></label><div id="rt-bulk-actions" hidden>' + button('Valeur', 'bulk-edit') + button('Figer', 'bulk-freeze') + button('Libérer', 'bulk-unfreeze') + button('×', 'clear-selection') + '</div></div><ul class="rt-list" aria-label="Entrées"></ul><div class="rt-pagination"><span id="rt-count" aria-live="polite"></span><div>' + button('‹', 'prev') + '<label><span class="rt-sr">Numéro de page</span><input id="rt-page-number" type="number" min="1" step="1" inputmode="numeric"></label><span id="rt-page-total"></span>' + button('›', 'next') + '</div></div></main><footer class="rt-footer">' + button('Traduction', 'translate-selection') + '<span class="rt-status" role="status" aria-live="polite"></span>' + button('Enregistrer', 'save-menu', 'rt-primary') + '</footer></section><div class="rt-modal" hidden><section class="rt-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="rt-modal-title" tabindex="-1"><header><h2 id="rt-modal-title">Édition</h2>' + button('✕', 'modal-close', 'rt-close') + '</header><div class="rt-modal-content"></div><div class="rt-modal-status" role="status" aria-live="polite"></div></section></div>';
+    $('[data-action="close"]').setAttribute('aria-label', 'Fermer le Toolkit');
+    $('[data-action="modal-close"]').setAttribute('aria-label', 'Fermer la fenêtre');
+    $('[data-action="clear-selection"]').setAttribute('aria-label', 'Effacer la sélection');
+    $('[data-action="prev"]').setAttribute('aria-label', 'Page précédente');
+    $('[data-action="next"]').setAttribute('aria-label', 'Page suivante');
     document.body.appendChild(root);
     ['keydown', 'keyup', 'keypress', 'mousedown', 'mouseup', 'mousemove', 'click', 'dblclick', 'contextmenu', 'touchstart', 'touchmove', 'touchend', 'wheel', 'pointerdown', 'pointerup'].forEach(function(type) {
         root.addEventListener(type, function(event) { event.stopPropagation(); }, { passive: type.indexOf('touch') === 0 || type === 'wheel' });
@@ -56,6 +62,7 @@ function buildRoot() {
     });
     root.addEventListener('submit', function(event) { event.preventDefault(); guarded(function() { submit(event.target.getAttribute('data-form')); }); });
     root.addEventListener('input', function(event) {
+        if (event.target.id === 'rt-exact') { exactValue = event.target.value; page = 0; clearTimeout(searchTimer); searchTimer = setTimeout(renderList,120); }
         if (event.target.id === 'rt-search') { query = event.target.value; clearTimeout(searchTimer); searchTimer = setTimeout(function() { page = 0; renderList(); }, 120); }
     });
     root.addEventListener('keydown', function(event) {
@@ -68,7 +75,20 @@ function buildRoot() {
     });
     root.addEventListener('change', function(event) {
         guarded(function() {
-            if (event.target.id === 'rt-filter') { filter = event.target.value; page = 0; renderList(); }
+            if (event.target.id === 'rt-filter') { filter = event.target.value; $('#rt-exact-wrap').hidden = filter !== 'value'; page = 0; renderList(); }
+            if (event.target.id === 'rt-category') {
+                var category = event.target.value;
+                if (/^(party|translations|history)$/.test(category)) { $('#rt-category').value = tab; openModal(category, labels[category]); if (category === 'party') renderParty(); else if (category === 'history') renderHistory(); else { pendingTranslations = picked(); renderTranslations(); } }
+                else { tab = category; checked = {}; selected = null; page = 0; render(); }
+            }
+            if (event.target.id === 'rt-page-number') { page = runtime.integer(event.target.value,1,Math.max(1,Math.ceil(found.length/pageSize))) - 1; renderList(); $('.rt-list').scrollTop = 0; }
+            if (event.target.id === 'rt-select-page') {
+                var rows = found.slice(page*pageSize,(page+1)*pageSize), active = event.target.checked;
+                if (active && picked().length + rows.filter(function(r) { return !checked[r.key]; }).length > 500) throw new Error('Maximum : 500 entrées sélectionnées.');
+                rows.forEach(function(r) { if (active) checked[r.key] = r; else delete checked[r.key]; }); renderList();
+            }
+            if (event.target.hasAttribute('data-check-index')) { var record = found[Number(event.target.getAttribute('data-check-index'))]; if (event.target.checked) { if (picked().length >= 500) { event.target.checked = false; throw new Error('Maximum : 500 entrées sélectionnées.'); } checked[record.key] = record; } else delete checked[record.key]; updateSelection(); }
+            if (event.target.id === 'rt-value-type') updateValueInput();
             if (event.target.id === 'rt-english') { runtime.prefs.english = event.target.checked; runtime.savePrefs(); renderList(); renderDetail(); }
             if (event.target.id === 'rt-source') { runtime.prefs.source = event.target.value; runtime.savePrefs(); }
             if (event.target.id === 'rt-import') importFile(event.target.files[0]);
@@ -78,26 +98,37 @@ function buildRoot() {
     });
 }
 function renderNav() {
-    var nav = '<span class="rt-nav-label">Explorer la partie</span>';
-    ['favorites', 'variables', 'switches', 'selfSwitches', 'items', 'weapons', 'armors', 'actors', 'skills', 'states'].forEach(function(k) {
-        nav += '<button type="button" data-action="tab" data-tab="' + k + '"' + (tab === k ? ' aria-current="page"' : '') + '><span>' + esc(labels[k]) + '</span><span class="rt-nav-count">' + runtime.list(k).length.toLocaleString() + '</span></button>';
-    });
-    nav += '<div class="rt-nav-sep"></div>';
-    ['party', 'translations', 'history'].forEach(function(k) { nav += '<button type="button" data-action="tab" data-tab="' + k + '"' + (tab === k ? ' aria-current="page"' : '') + '>' + esc(labels[k]) + '</button>'; });
-    $('.rt-nav').innerHTML = nav;
+    $('#rt-category').innerHTML = Object.keys(labels).map(function(k) { return '<option value="' + k + '">' + esc(labels[k]) + '</option>'; }).join('');
+    $('#rt-category').value = tab;
 }
 function render() {
-    root.classList.remove('rt-detail-open');
-    clearTimeout(searchTimer);
-    renderNav(); updateHistoryButtons();
-    if (tab === 'party') { renderParty(); return; }
-    if (tab === 'translations') { renderTranslations(); return; }
-    if (tab === 'history') { renderHistory(); return; }
-    $('.rt-main').innerHTML = '<div class="rt-toolbar"><div class="rt-title-line"><div><h2>' + esc(labels[tab]) + '</h2><p class="rt-muted rt-small" style="margin:0">' + esc(hints[tab]) + '</p></div></div><div class="rt-controls"><label class="rt-search"><span class="rt-sr">Rechercher par nom, ID ou valeur</span><input id="rt-search" type="search" placeholder="Rechercher un nom, #ID, value:42…" value="' + esc(query) + '"></label><label><span class="rt-sr">Filtrer les entrées</span><select id="rt-filter"><option value="all">Tout afficher</option><option value="named">Avec un nom</option><option value="favorites">Favoris</option><option value="active">Non nul / possédé / ON</option><option value="changed">Changé depuis le repère</option></select></label></div><details class="rt-tools"><summary>Options et traduction</summary><div class="rt-controls" style="margin-top:8px"><label class="rt-checkbox rt-small"><input type="checkbox" id="rt-english"' + (runtime.prefs.english ? ' checked' : '') + '>Noms anglais</label>' + button('Traduire cette page', 'translate-page') + button('Créer un repère', 'baseline') + button('Actualiser', 'refresh') + '</div></details></div><div class="rt-workbench"><section class="rt-results" aria-label="Résultats"><div class="rt-columns"><span>Nom / identifiant</span><span>Valeur</span></div><ul class="rt-list" aria-label="Entrées"></ul><div class="rt-pagination"><span id="rt-count" aria-live="polite"></span><div>' + button('‹', 'prev') + ' ' + button('›', 'next') + '</div></div></section><aside class="rt-detail" aria-label="Détails et édition"></aside></div>';
-    $('#rt-filter').value = filter;
-    $('[data-action="prev"]').setAttribute('aria-label', 'Page précédente');
-    $('[data-action="next"]').setAttribute('aria-label', 'Page suivante');
-    renderList(); renderDetail();
+    clearTimeout(searchTimer); renderNav(); $('#rt-search').value = query; $('#rt-filter').value = filter; renderList();
+}
+function openModal(mode, title) {
+    if (!modalMode) modalFocus = document.activeElement;
+    modalMode = mode; $('.rt-modal').hidden = false; $('.rt-modal-content').innerHTML = ''; $('.rt-modal-status').textContent = '';
+    $('#rt-modal-title').textContent = title; $('.rt-panel').setAttribute('aria-hidden','true'); $('.rt-panel').inert = true;
+    $('.rt-modal-dialog').focus();
+}
+function closeModal() {
+    if (!modalMode) return;
+    modalMode = ''; $('.rt-modal').hidden = true; $('.rt-panel').removeAttribute('aria-hidden'); $('.rt-panel').inert = false;
+    if (opened) renderList();
+    if (modalFocus && document.contains(modalFocus)) modalFocus.focus(); else $('.rt-panel').focus();
+}
+function updateSelection() {
+    var n = picked().length, rows = found.slice(page*pageSize,(page+1)*pageSize);
+    $('#rt-selection-count').textContent = n ? n + ' sélectionné(s)' : 'Sélection';
+    $('#rt-bulk-actions').hidden = !n;
+    $('#rt-select-page').checked = !!rows.length && rows.every(function(r) { return !!checked[r.key]; });
+    $('#rt-select-page').indeterminate = rows.some(function(r) { return !!checked[r.key]; }) && !$('#rt-select-page').checked;
+    $('#rt-select-page').disabled = !rows.length;
+}
+function rowAction(text, action, index, label, pressed, disabled) {
+    return '<button type="button" class="rt-quick" data-action="' + action + '" data-index="' + index + '" aria-label="' + esc(label) + '" title="' + esc(label) + '"' + (typeof pressed === 'boolean' ? ' aria-pressed="' + pressed + '"' : '') + (disabled ? ' disabled' : '') + '>' + text + '</button>';
+}
+function lockIcon(locked) {
+    return '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5"/>' + (locked ? '<path d="M5 7V5a3 3 0 016 0v2"/>' : '<path d="M5 7V5a3 3 0 015-2"/>') + '<path d="M8 10v2"/></svg>';
 }
 function rowValue(r) {
     var v = runtime.printable(runtime.value(r));
@@ -109,16 +140,20 @@ function rowValue(r) {
 function renderList() {
     if (!$('.rt-list')) return;
     found = runtime.search(tab, query, filter);
-    page = Math.max(0, Math.min(page, Math.ceil(found.length / pageSize) - 1));
-    var start = page * pageSize, rows = found.slice(start, start + pageSize);
-    $('.rt-list').innerHTML = rows.length ? rows.map(function(r, index) {
-        var sub = '#' + r.id + (tab === 'favorites' ? ' · ' + labels[r.kind] : '') + (runtime.alias(r) && runtime.prefs.english ? ' · ' + r.original : '') + (runtime.changed(r) ? ' · modifié' : '');
-        return '<li class="rt-row' + (selected && selected.key === r.key ? ' rt-selected' : '') + '"><button type="button" class="rt-select" data-action="select" data-index="' + (start + index) + '" aria-pressed="' + !!(selected && selected.key === r.key) + '">' + (r.data && typeof r.data.iconIndex === 'number' ? '<canvas class="rt-icon" width="32" height="32" data-icon="' + Number(r.data.iconIndex) + '" aria-hidden="true"></canvas>' : '') + '<span class="rt-row-main"><span class="rt-row-title">' + esc(runtime.title(r)) + '</span><span class="rt-row-sub">' + esc(sub) + '</span></span><span class="rt-row-value">' + esc(rowValue(r)) + '</span></button><button class="rt-star" type="button" data-action="star" data-index="' + (start + index) + '" aria-label="Favori : ' + esc(runtime.title(r)) + '" aria-pressed="' + !!runtime.prefs.favorites[r.key] + '">' + (runtime.prefs.favorites[r.key] ? '★' : '☆') + '</button></li>';
-    }).join('') : '<li>' + empty('Aucun résultat', query || filter !== 'all' ? 'Essayez un autre nom, un ID ou le filtre « Tout afficher ».' : 'Aucune entrée dans cette catégorie.') + '</li>';
-    $('#rt-count').textContent = found.length ? (start + 1) + '–' + (start + rows.length) + ' sur ' + found.length.toLocaleString() : '0 résultat';
-    $('[data-action="prev"]').disabled = page === 0;
-    $('[data-action="next"]').disabled = start + pageSize >= found.length;
-    paintIcons();
+    if (filter === 'value') found = found.filter(function(r) { return String(runtime.value(r)) === exactValue; });
+    page = Math.max(0, Math.min(page, Math.ceil(found.length/pageSize)-1));
+    var start = page*pageSize, rows = found.slice(start,start+pageSize);
+    $('.rt-list').innerHTML = rows.length ? rows.map(function(r,i) {
+        var index = start+i, v = runtime.value(r), edit = runtime.editable(r), frozen = runtime.isFrozen(r), name = runtime.title(r), quick = '';
+        if (edit && typeof v === 'number') quick = rowAction('−99','minus99',index,'Retirer 99 : '+name) + rowAction('+99','plus99',index,'Ajouter 99 : '+name);
+        else if (edit && typeof v === 'boolean') quick = rowAction(v ? 'false' : 'true','toggle-bool',index,'Basculer : '+name);
+        return '<li class="rt-row' + (frozen ? ' rt-frozen' : '') + '"><label class="rt-row-check"><input type="checkbox" data-check-index="' + index + '" aria-label="Sélectionner : ' + esc(name) + '"' + (checked[r.key] ? ' checked' : '') + '></label><button type="button" class="rt-select" data-action="select" data-index="' + index + '" title="' + esc(name+' · #'+r.id) + '"><span class="rt-row-id">#' + esc(r.id) + '</span><span class="rt-row-title">' + esc(name) + '</span></button><span class="rt-row-value" title="' + esc(String(v)) + '">' + esc(typeof v === 'boolean' ? String(v) : rowValue(r)) + '</span><div class="rt-row-actions">' + quick + rowAction(runtime.prefs.favorites[r.key] ? '★' : '☆','star',index,'Favori : '+name,!!runtime.prefs.favorites[r.key]) + rowAction(lockIcon(frozen),'freeze',index,(frozen?'Libérer : ':'Figer : ')+name,frozen,!edit) + rowAction('✎','select',index,'Éditer : '+name) + '</div></li>';
+    }).join('') : '<li class="rt-empty">Aucun résultat. Changez la recherche ou le filtre.</li>';
+    $('#rt-count').textContent = found.length ? (start+1)+'–'+(start+rows.length)+' / '+found.length.toLocaleString() : '0 résultat';
+    $('#rt-page-number').value = page+1; $('#rt-page-number').max = Math.max(1,Math.ceil(found.length/pageSize));
+    $('#rt-page-total').textContent = '/ '+Math.max(1,Math.ceil(found.length/pageSize));
+    $('[data-action="prev"]').disabled = page===0; $('[data-action="next"]').disabled = start+pageSize>=found.length;
+    updateSelection();
 }
 function paintIcons() {
     if (!g.ImageManager || !g.ImageManager.loadSystem) return;
@@ -138,16 +173,15 @@ function actorOptions() {
 }
 function actorTarget() { return '<label class="rt-field"><span>Acteur</span><select id="rt-actor-target">' + actorOptions() + '</select></label><p class="rt-muted rt-small" id="rt-actor-context"></p>'; }
 function renderDetail() {
-    var detail = $('.rt-detail'); if (!detail) return;
+    var detail = $('.rt-detail'); if (!detail || modalMode !== 'edit') return;
     if (!selected) { detail.innerHTML = empty('Choisissez une entrée', 'Consultez son nom d’origine, sa valeur et ses commandes ici.'); return; }
     var r = selected, kind = r.kind, v = runtime.value(r);
-    var html = button('‹ Retour aux résultats', 'back-results', 'rt-back') + '<span class="rt-id">' + esc(labels[kind]) + ' · #' + esc(r.id) + '</span><h3>' + esc(runtime.title(r)) + '</h3><p class="rt-muted rt-small">Nom d’origine : ' + esc(r.original || '(sans nom)') + '</p>';
+    var html = '<span class="rt-id">' + esc(labels[kind]) + ' · #' + esc(r.id) + '</span><h3>' + esc(runtime.title(r)) + '</h3><p class="rt-muted rt-small">Nom d’origine : ' + esc(r.original || '(sans nom)') + '</p>';
     if (r.data && r.data.description) html += '<p class="rt-small">' + esc(r.data.description) + '</p>';
     html += '<div class="rt-divider"></div>';
     if (kind === 'variables') {
-        if (typeof v === 'number' || typeof v === 'string') {
-            html += '<form data-form="variable"><label class="rt-field"><span>Type de valeur</span><select id="rt-value-type"><option value="number"' + (typeof v === 'number' ? ' selected' : '') + '>Nombre entier</option><option value="string"' + (typeof v === 'string' ? ' selected' : '') + '>Texte</option></select></label><label class="rt-field"><span>Valeur actuelle → nouvelle valeur</span><textarea id="rt-value" maxlength="10000">' + esc(v) + '</textarea></label><button class="rt-primary rt-full" type="submit">Appliquer la valeur</button></form><p class="rt-muted rt-small" style="margin-top:10px">Les événements peuvent changer cette valeur à la reprise du jeu.</p>';
-        } else html += '<p>Type complexe, en lecture seule.</p><pre>' + esc(runtime.printable(v)) + '</pre>';
+        if (runtime.editable(r)) html += valueForm(v, 'variable');
+        else html += '<p>Type complexe, en lecture seule.</p><pre>' + esc(runtime.printable(v)) + '</pre>';
     } else if (kind === 'switches' || kind === 'selfSwitches') {
         html += '<p>État actuel : <strong>' + (v ? 'ON · activé' : 'OFF · désactivé') + '</strong></p><div class="rt-actions">' + button('Activer ON', 'switch-on', v ? '' : 'rt-primary') + button('Désactiver OFF', 'switch-off', v ? 'rt-primary' : '') + '</div>';
     } else if (/^(items|weapons|armors)$/.test(kind)) {
@@ -159,8 +193,23 @@ function renderDetail() {
     else if (kind === 'skills' || kind === 'states') html += actorTarget() + '<div class="rt-actions">' + button(kind === 'skills' ? 'Apprendre' : 'Ajouter l’état', kind === 'skills' ? 'learn' : 'add-state', 'rt-primary') + button(kind === 'skills' ? 'Oublier' : 'Retirer l’état', kind === 'skills' ? 'forget' : 'remove-state') + '</div><p class="rt-muted rt-small" style="margin-top:12px">Ces actions respectent les règles du moteur et réinitialisent l’annulation.</p>';
     html += '<div class="rt-divider"></div><form data-form="alias">' + field('Nom anglais · affichage uniquement', 'rt-alias', runtime.alias(r), 'text', 'maxlength="2000" placeholder="Saisir une traduction…"') + '<div class="rt-actions"><button type="submit">Enregistrer le nom</button>' + button('Traduire en ligne', 'translate-one') + '</div></form>';
     detail.innerHTML = html;
-    renderActorContext();
+    updateValueInput(); renderActorContext();
 }
+
+function valueForm(value, form) {
+    var type = typeof value === 'boolean' ? 'boolean' : typeof value === 'string' && form !== 'bulk' ? 'string' : 'number';
+    return '<form data-form="' + form + '"><label class="rt-field"><span>Type</span><select id="rt-value-type"><option value="number"' + (type==='number'?' selected':'') + '>Int · nombre entier</option><option value="boolean"' + (type==='boolean'?' selected':'') + '>Bool · true / false</option><option value="string"' + (type==='string'?' selected':'') + '>Texte</option></select></label><label class="rt-field" id="rt-value-wrap"><span>Nouvelle valeur</span><textarea id="rt-value" maxlength="10000">' + esc(value) + '</textarea></label><label class="rt-field" id="rt-bool-wrap" hidden><span>Nouvelle valeur</span><select id="rt-bool"><option value="true"' + (value===true?' selected':'') + '>true</option><option value="false"' + (value!==true?' selected':'') + '>false</option></select></label><button class="rt-primary rt-full" type="submit">' + (form==='bulk'?'Appliquer à la sélection':'Appliquer la valeur') + '</button></form>';
+}
+function updateValueInput() {
+    if (!$('#rt-value-type')) return;
+    var bool = $('#rt-value-type').value === 'boolean'; $('#rt-value-wrap').hidden = bool; $('#rt-bool-wrap').hidden = !bool;
+    $('#rt-value').setAttribute('inputmode',$('#rt-value-type').value==='number'?'numeric':'text');
+}
+function readValueInput() {
+    var type = $('#rt-value-type').value;
+    return type === 'boolean' ? $('#rt-bool').value === 'true' : type === 'number' ? runtime.integer($('#rt-value').value,-9007199254740991,9007199254740991) : $('#rt-value').value;
+}
+
 function actorEditor(r) {
     var a = runtime.actor(r.id), html = '<p class="rt-muted rt-small">Nom en partie : ' + esc(a.name()) + '</p>';
     html += '<form data-form="actor-stat"><label class="rt-field"><span>Statistique à modifier</span><select id="rt-stat"><option value="hp">HP · ' + a.hp + '/' + a.mhp + '</option><option value="mp">MP · ' + a.mp + '/' + a.mmp + '</option><option value="tp">TP · ' + a.tp + '/' + a.maxTp() + '</option><option value="level">Niveau · ' + a.level + '/' + a.maxLevel() + '</option><option value="exp">EXP · ' + a.currentExp() + '</option></select></label>' + field('Nouvelle valeur', 'rt-stat-value', a.hp, 'number', 'min="0" step="1" required') + '<button type="submit" class="rt-primary rt-full">Appliquer à cet acteur</button></form>' + button('Soigner complètement', 'recover', 'rt-full') + '<div class="rt-note">Les commandes d’acteur peuvent affecter plusieurs statistiques. Elles réinitialisent la pile d’annulation.</div><h4>Équipement porté</h4>';
@@ -177,7 +226,7 @@ function renderActorContext() {
     $('#rt-actor-context').textContent = text;
 }
 function renderParty() {
-    $('.rt-main').innerHTML = '<div class="rt-page"><h2>Partie</h2><p class="rt-muted">' + esc(g.$dataSystem.gameTitle) + ' · ' + esc(g.Utils.RPGMAKER_NAME) + ' ' + esc(g.Utils.RPGMAKER_VERSION) + '</p><div class="rt-stats"><div class="rt-stat"><span class="rt-muted rt-small">OR</span><strong>' + g.$gameParty.gold().toLocaleString() + '</strong></div><div class="rt-stat"><span class="rt-muted rt-small">CARTE</span><strong>#' + g.$gameMap.mapId() + '</strong></div><div class="rt-stat"><span class="rt-muted rt-small">POSITION</span><strong>' + g.$gamePlayer.x + ', ' + g.$gamePlayer.y + '</strong></div></div><form data-form="gold"><h3>Argent de la partie</h3>' + field('Nouveau total (' + g.$dataSystem.currencyUnit + ')', 'rt-gold', g.$gameParty.gold(), 'number', 'min="0" max="' + g.$gameParty.maxGold() + '" step="1" required') + '<button class="rt-primary" type="submit">Définir le total</button></form><div class="rt-divider"></div><section><h3>Sauvegarde</h3><p class="rt-muted">Les modifications sont appliquées à la partie en cours. Utilisez la sauvegarde du jeu pour les conserver.</p>' + button('Ouvrir le menu de sauvegarde', 'save-menu') + '<div class="rt-note">Enregistrez dans un emplacement distinct si vous souhaitez garder votre progression précédente.</div></section></div>';
+    $('.rt-modal-content').innerHTML = '<div class="rt-page"><h2>Partie</h2><p class="rt-muted">' + esc(g.$dataSystem.gameTitle) + ' · ' + esc(g.Utils.RPGMAKER_NAME) + ' ' + esc(g.Utils.RPGMAKER_VERSION) + '</p><div class="rt-stats"><div class="rt-stat"><span class="rt-muted rt-small">OR</span><strong>' + g.$gameParty.gold().toLocaleString() + '</strong></div><div class="rt-stat"><span class="rt-muted rt-small">CARTE</span><strong>#' + g.$gameMap.mapId() + '</strong></div><div class="rt-stat"><span class="rt-muted rt-small">POSITION</span><strong>' + g.$gamePlayer.x + ', ' + g.$gamePlayer.y + '</strong></div></div><form data-form="gold"><h3>Argent de la partie</h3>' + field('Nouveau total (' + g.$dataSystem.currencyUnit + ')', 'rt-gold', g.$gameParty.gold(), 'number', 'min="0" max="' + g.$gameParty.maxGold() + '" step="1" required') + '<button class="rt-primary" type="submit">Définir le total</button></form><div class="rt-divider"></div><section><h3>Sauvegarde</h3><p class="rt-muted">Les modifications sont appliquées à la partie en cours. Utilisez la sauvegarde du jeu pour les conserver.</p>' + button('Ouvrir le menu de sauvegarde', 'save-menu') + '<div class="rt-note">Enregistrez dans un emplacement distinct si vous souhaitez garder votre progression précédente.</div></section></div>';
 }
 function sourceSelector() {
     var languages = { ja: 'Japonais', fr: 'Français', 'zh-CN': 'Chinois simplifié', 'zh-TW': 'Chinois traditionnel', ko: 'Coréen', ru: 'Russe', es: 'Espagnol', de: 'Allemand', it: 'Italien', pt: 'Portugais', en: 'Anglais' };
@@ -185,21 +234,21 @@ function sourceSelector() {
 }
 var pendingTranslations = [];
 function renderTranslations() {
-    $('.rt-main').innerHTML = '<div class="rt-page"><h2>Traductions anglaises</h2><p class="rt-muted">Un nom plus clair, avec les données d’origine intactes.</p><section><div class="rt-note">Les traductions changent uniquement les noms affichés dans le Toolkit. Elles ne modifient ni les identifiants, ni les valeurs, ni les textes du jeu.</div><h3>Traduction à la demande</h3>' + sourceSelector() + '<p class="rt-small rt-muted">Le bouton ci-dessous envoie les noms sélectionnés à MyMemory (service tiers) pour les traduire en anglais. Les valeurs des variables ne sont pas envoyées. Le service gratuit sans clé est soumis à un quota ; réseau et autorisation CORS nécessaires.</p><p id="rt-translation-count">' + pendingTranslations.length + ' nom(s) sélectionné(s), déjà traduits exclus automatiquement.</p><div class="rt-actions">' + button('Envoyer les noms à MyMemory', 'translate-start', 'rt-primary') + button('Arrêter', 'translate-stop') + '</div><p id="rt-translation-progress" class="rt-small" role="status" style="margin-top:12px"></p><div class="rt-divider"></div><h3>Dictionnaire local</h3><p class="rt-muted">' + Object.keys(runtime.prefs.aliases).length + ' alias enregistré(s) pour ce jeu. Saisissez un nom anglais dans les détails d’une entrée ou importez un dictionnaire JSON.</p><div class="rt-actions">' + button('Exporter les traductions', 'export-aliases') + button('Exporter les noms à traduire', 'export-names') + '</div><label class="rt-field" style="margin-top:16px"><span>Importer un dictionnaire JSON (5 Mo maximum)</span><input id="rt-import" type="file" accept=".json,application/json"></label><p class="rt-small rt-muted">L’import ne retient que les entrées dont la catégorie, l’ID et le nom d’origine correspondent. Les fichiers ne sont pas envoyés à un serveur.</p></section></div>';
+    $('.rt-modal-content').innerHTML = '<div class="rt-page"><h2>Traductions anglaises</h2><label class="rt-checkbox"><input id="rt-english" type="checkbox"' + (runtime.prefs.english ? ' checked' : '') + '>Afficher les noms anglais</label><p class="rt-muted">Un nom plus clair, avec les données d’origine intactes.</p><section><div class="rt-note">Les traductions changent uniquement les noms affichés dans le Toolkit. Elles ne modifient ni les identifiants, ni les valeurs, ni les textes du jeu.</div><h3>Traduction à la demande</h3>' + sourceSelector() + '<p class="rt-small rt-muted">Le bouton ci-dessous envoie les noms sélectionnés à MyMemory (service tiers) pour les traduire en anglais. Les valeurs des variables ne sont pas envoyées. Le service gratuit sans clé est soumis à un quota ; réseau et autorisation CORS nécessaires.</p><p id="rt-translation-count">' + pendingTranslations.length + ' nom(s) sélectionné(s), déjà traduits exclus automatiquement.</p><div class="rt-actions">' + button('Envoyer les noms à MyMemory', 'translate-start', 'rt-primary') + button('Arrêter', 'translate-stop') + '</div><p id="rt-translation-progress" class="rt-small" role="status" style="margin-top:12px"></p><div class="rt-divider"></div><h3>Dictionnaire local</h3><p class="rt-muted">' + Object.keys(runtime.prefs.aliases).length + ' alias enregistré(s) pour ce jeu. Saisissez un nom anglais dans les détails d’une entrée ou importez un dictionnaire JSON.</p><div class="rt-actions">' + button('Exporter les traductions', 'export-aliases') + button('Exporter les noms à traduire', 'export-names') + '</div><label class="rt-field" style="margin-top:16px"><span>Importer un dictionnaire JSON (5 Mo maximum)</span><input id="rt-import" type="file" accept=".json,application/json"></label><p class="rt-small rt-muted">L’import ne retient que les entrées dont la catégorie, l’ID et le nom d’origine correspondent. Les fichiers ne sont pas envoyés à un serveur.</p></section></div>';
     $('[data-action="translate-start"]').disabled = !pendingTranslations.length || translator.busy();
     $('[data-action="translate-stop"]').disabled = !translator.busy();
 }
 function renderHistory() {
-    $('.rt-main').innerHTML = '<div class="rt-page"><h2>Historique de cette session</h2><p class="rt-muted">100 dernières opérations. Annulation et rétablissement limités à 80 modifications simples. Le chargement d’une partie réinitialise cet historique.</p>' + (runtime.log().length ? runtime.log().map(function(entry) { return '<div class="rt-log-entry"><span class="rt-muted rt-small">' + esc(entry.time) + ' · ' + (entry.reversible ? 'Modification simple' : 'Opération') + '</span><strong>' + esc(entry.label) + '</strong><code>' + esc(entry.before) + ' → ' + esc(entry.after) + '</code></div>'; }).join('') : empty('Aucune modification', 'Les opérations effectuées depuis ce panneau apparaîtront ici.')) + '</div>';
+    $('.rt-modal-content').innerHTML = '<div class="rt-page">' + button('Annuler', 'undo') + button('Rétablir', 'redo') + button('Créer un repère', 'baseline') + '<h2>Historique de cette session</h2><p class="rt-muted">100 dernières opérations. Annulation et rétablissement limités à 80 modifications simples. Le chargement d’une partie réinitialise cet historique.</p>' + (runtime.log().length ? runtime.log().map(function(entry) { return '<div class="rt-log-entry"><span class="rt-muted rt-small">' + esc(entry.time) + ' · ' + (entry.reversible ? 'Modification simple' : 'Opération') + '</span><strong>' + esc(entry.label) + '</strong><code>' + esc(entry.before) + ' → ' + esc(entry.after) + '</code></div>'; }).join('') : empty('Aucune modification', 'Les opérations effectuées depuis ce panneau apparaîtront ici.')) + '</div>';
 }
-function updateHistoryButtons() { $('[data-action="undo"]').disabled = !runtime.canUndo(); $('[data-action="redo"]').disabled = !runtime.canRedo(); }
+function updateHistoryButtons() { if ($('[data-action="undo"]')) $('[data-action="undo"]').disabled = !runtime.canUndo(); if ($('[data-action="redo"]')) $('[data-action="redo"]').disabled = !runtime.canRedo(); }
 function changed(message, actorChange) {
-    dirty = true; updateHistoryButtons(); renderList(); renderDetail(); if (tab === 'party') renderParty();
+    dirty = true; updateHistoryButtons(); renderList(); renderDetail(); if (modalMode === 'party') renderParty();
     say(message + (actorChange ? ' · Pile d’annulation réinitialisée.' : ''));
 }
 function translateChoice(records) {
     pendingTranslations = records.filter(function(r) { return r.original.trim() && !runtime.alias(r); });
-    tab = 'translations'; render();
+    openModal('translations', 'Traduction'); renderTranslations();
 }
 function startTranslation() {
     if (!pendingTranslations.length) { say('Sélectionnez une entrée ou une page à traduire.'); return; }
@@ -208,9 +257,9 @@ function startTranslation() {
         if ($('#rt-translation-progress')) $('#rt-translation-progress').textContent = done + ' / ' + total + ' noms traduits';
         say(done + ' / ' + total + ' noms traduits');
     }).then(function(count) {
-        pendingTranslations = []; if (opened && tab === 'translations') renderTranslations();
+        pendingTranslations = []; if (opened && modalMode === 'translations') renderTranslations();
         if (opened) say(count + ' nom(s) traduit(s).' + (runtime.storageWarning() ? ' Stockage local indisponible : exportez le dictionnaire.' : ''));
-    }).catch(function(e) { if (opened) { if (tab === 'translations') renderTranslations(); say(e.message, true); } });
+    }).catch(function(e) { if (opened) { if (modalMode === 'translations') renderTranslations(); say(e.message, true); } });
     renderTranslations();
 }
 function download(name, data) {
@@ -225,7 +274,7 @@ function importFile(file) {
     reader.onload = function() { guarded(function() {
         if (g.$gameVariables !== session) throw new Error('La partie a changé. Relancez l’import.');
         var result = runtime.importAliases(JSON.parse(reader.result.replace(/^\uFEFF/, '')));
-        if (opened && tab === 'translations') renderTranslations();
+        if (opened && modalMode === 'translations') renderTranslations();
         say(result.imported + ' traduction(s) importée(s), ' + result.skipped + ' ignorée(s).' + (runtime.storageWarning() ? ' Exportez le dictionnaire : le stockage local est indisponible.' : ''));
     }); };
     reader.onerror = function() { say('Impossible de lire ce fichier.', true); };
@@ -233,15 +282,27 @@ function importFile(file) {
 }
 function act(action, node) {
     var r, id;
+    if (action === 'modal-close' || action === 'back-results') { closeModal(); return; }
+    if (action === 'select') { selected = found[Number(node.getAttribute('data-index'))]; openModal('edit', 'Éditer · #' + selected.id); $('.rt-modal-content').innerHTML = '<div class="rt-detail"></div>'; renderDetail(); return; }
+    if (action === 'clear-selection') { checked = {}; renderList(); return; }
+    if (action === 'translate-selection') { translateChoice(picked().length ? picked() : found.slice(page*pageSize,(page+1)*pageSize)); return; }
+    if (action === 'bulk-edit') { openModal('bulk', 'Modifier ' + picked().length + ' entrées'); $('.rt-modal-content').innerHTML = '<p>La valeur sera appliquée à toute la sélection, y compris sur les autres pages. Un type incompatible annule le groupe entier.</p>' + valueForm('', 'bulk') + '<p class="rt-small rt-muted">Maximum : 500 entrées. Les gels existants suivront la nouvelle valeur.</p>'; updateValueInput(); return; }
+    if (action === 'bulk-freeze' || action === 'bulk-unfreeze') { var count = runtime.freezeMany(picked(),action === 'bulk-freeze'); renderList(); say(count + (action === 'bulk-freeze' ? ' valeurs figées pour cette session.' : ' valeurs libérées.')); return; }
+    if (/^(minus99|plus99|toggle-bool|freeze)$/.test(action)) {
+        r = found[Number(node.getAttribute('data-index'))];
+        if (action === 'freeze') { runtime.freezeMany([r],!runtime.isFrozen(r)); renderList(); say(runtime.isFrozen(r) ? 'Valeur figée pendant cette session.' : 'Valeur libérée.'); return; }
+        var v = runtime.value(r), next;
+        if (action === 'toggle-bool') next = !v;
+        else { next = v + (action === 'minus99' ? -99 : 99); if (/^(items|weapons|armors)$/.test(r.kind)) next = Math.max(0,Math.min(g.$gameParty.maxItems(r.data),next)); }
+        runtime.setValue(r,next); changed('Valeur : ' + String(runtime.value(r))); return;
+    }
     if (action === 'close') { closeToolkit(); return; }
     if (action === 'tab') { tab = node.getAttribute('data-tab'); page = 0; query = ''; filter = 'all'; selected = null; render(); return; }
-    if (action === 'back-results') { root.classList.remove('rt-detail-open'); var row = $('.rt-selected .rt-select'); if (row) row.focus(); return; }
-    if (action === 'select') { root.classList.add('rt-detail-open'); selected = found[Number(node.getAttribute('data-index'))]; renderList(); renderDetail(); var chosen = mobileLayout() ? $('.rt-back') : $('.rt-detail input, .rt-detail select, .rt-detail textarea, .rt-detail button'); if (chosen) chosen.focus(); return; }
     if (action === 'star') { r = found[Number(node.getAttribute('data-index'))]; runtime.prefs.favorites[r.key] = !runtime.prefs.favorites[r.key]; runtime.savePrefs(); renderNav(); renderList(); if (runtime.storageWarning()) say('Favori conservé en mémoire seulement : stockage local indisponible.', true); return; }
     if (action === 'prev' || action === 'next') { page += action === 'next' ? 1 : -1; renderList(); $('.rt-list').scrollTop = 0; $('[data-action="' + action + '"]').focus(); return; }
     if (action === 'baseline') { say(runtime.capture() + ' valeurs mémorisées. Reprenez le jeu, puis utilisez le filtre « Changé depuis le repère ».'); renderList(); return; }
     if (action === 'refresh') { var key = selected && selected.key; runtime.refresh(); selected = key ? runtime.list(selected.kind).filter(function(x) { return x.key === key; })[0] || null : null; render(); say('Données actualisées.'); return; }
-    if (action === 'undo' || action === 'redo') { runtime[action](); changed(action === 'undo' ? 'Modification annulée.' : 'Modification rétablie.'); if (tab === 'history') renderHistory(); return; }
+    if (action === 'undo' || action === 'redo') { runtime[action](); changed(action === 'undo' ? 'Modification annulée.' : 'Modification rétablie.'); if (modalMode === 'history') renderHistory(); return; }
     if (action === 'translate-page') { translateChoice(found.slice(page * pageSize, (page + 1) * pageSize)); return; }
     if (action === 'translate-one') { translateChoice([selected]); return; }
     if (action === 'translate-start') { startTranslation(); return; }
@@ -268,8 +329,9 @@ function act(action, node) {
     }
 }
 function submit(form) {
+    if (form === 'bulk') { var count = runtime.setMany(picked(),readValueInput()); changed(count + ' entrées modifiées.'); closeModal(); return; }
     if (form === 'variable') {
-        var next = $('#rt-value-type').value === 'number' ? runtime.integer($('#rt-value').value, -9007199254740991, 9007199254740991) : $('#rt-value').value;
+        var next = readValueInput();
         runtime.setValue(selected, next); changed('Valeur actuelle : ' + runtime.printable(runtime.value(selected)) + '.');
     }
     if (form === 'quantity') { runtime.setValue(selected, $('#rt-quantity').value); changed('Quantité actuelle : ' + runtime.value(selected) + '.'); }
@@ -282,7 +344,7 @@ function openToolkit() {
     if (!allowed()) return false;
     try {
         if (!runtime) { var storage; try { storage = g.localStorage; } catch (e) { storage = { getItem: function() { return null; }, setItem: function() { throw new Error('Stockage indisponible'); } }; } runtime = createToolkitRuntime(g, storage); translator = createToolkitTranslator(runtime, g); }
-        runtime.refresh(); selected = null;
+        runtime.refresh(); selected = null; checked = {}; 
         buildRoot(); previousFocus = document.activeElement; openScene = g.SceneManager._scene;
         openVariables = g.$gameVariables; opened = true; root.hidden = false; if (launch) launch.hidden = true;
         clearInput(); render();
@@ -299,12 +361,12 @@ function refreshSceneWindows() {
 }
 function closeToolkit() {
     if (!opened) return;
-    opened = false; clearTimeout(searchTimer); if (translator) translator.cancel(); root.hidden = true;
+    closeModal(); opened = false; clearTimeout(searchTimer); if (translator) translator.cancel(); root.hidden = true;
     clearInput(); refreshSceneWindows();
     if (previousFocus && document.contains(previousFocus)) previousFocus.focus();
 }
 function toggleToolkit() { return opened ? closeToolkit() : openToolkit(); }
-g.RPGMToolkit = { version: '1.1.0', open: openToolkit, close: closeToolkit, toggle: toggleToolkit, isOpen: function() { return opened; } };
+g.RPGMToolkit = { version: '1.2.0', open: openToolkit, close: closeToolkit, toggle: toggleToolkit, isOpen: function() { return opened; } };
 var heldCloseKey = null;
 g.addEventListener('keydown', function(event) {
     var key = event.key || ({ 117: 'F6', 118: 'F7', 121: 'F10', 27: 'Escape' }[event.keyCode]);
@@ -313,16 +375,16 @@ g.addEventListener('keydown', function(event) {
         if (opened || allowed()) { event.preventDefault(); event.stopImmediatePropagation(); heldCloseKey = key; if (!event.repeat) toggleToolkit(); } return;
     }
     if (!opened) return;
-    if (key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); heldCloseKey = key; if (mobileLayout() && root.classList.contains('rt-detail-open')) { root.classList.remove('rt-detail-open'); var row = $('.rt-selected .rt-select'); if (row) row.focus(); } else closeToolkit(); return; }
-    if ((event.ctrlKey || event.metaKey) && (key === 'f' || key === 'F')) { event.preventDefault(); event.stopImmediatePropagation(); if ($('#rt-search')) $('#rt-search').focus(); return; }
+    if (key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); heldCloseKey = key; if (modalMode) closeModal(); else closeToolkit(); return; }
+    if ((event.ctrlKey || event.metaKey) && (key === 'f' || key === 'F')) { event.preventDefault(); event.stopImmediatePropagation(); if (!modalMode && $('#rt-search')) $('#rt-search').focus(); return; }
     if (key === 'Tab') {
-        var focusables = Array.prototype.slice.call(root.querySelectorAll('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href]')).filter(function(el) { return el.offsetWidth || el.offsetHeight; });
+        var focusables = Array.prototype.slice.call((modalMode ? $('.rt-modal') : $('.rt-panel')).querySelectorAll('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href]')).filter(function(el) { return el.offsetWidth || el.offsetHeight; });
         if (!focusables.length) return;
         var first = focusables[0], last = focusables[focusables.length - 1];
         if (event.shiftKey && (document.activeElement === first || focusables.indexOf(document.activeElement) < 0)) { event.preventDefault(); last.focus(); }
         else if (!event.shiftKey && (document.activeElement === last || focusables.indexOf(document.activeElement) < 0)) { event.preventDefault(); first.focus(); }
     }
-    if (!root.contains(event.target)) { event.stopImmediatePropagation(); event.preventDefault(); $('.rt-panel').focus(); }
+    if (!root.contains(event.target)) { event.stopImmediatePropagation(); event.preventDefault(); (modalMode ? $('.rt-modal-dialog') : $('.rt-panel')).focus(); }
 }, true);
 g.addEventListener('keyup', function(event) {
     if (heldCloseKey && event.key === heldCloseKey) { event.stopImmediatePropagation(); heldCloseKey = null; }
@@ -341,7 +403,8 @@ var originalUpdateScene = g.SceneManager.updateScene;
 g.SceneManager.updateScene = function() {
     if (opened && (this._scene !== openScene || g.$gameVariables !== openVariables || this.isSceneChanging())) closeToolkit();
     if (launch) { var hidden = opened || !allowed(); if (launch.hidden !== hidden) launch.hidden = hidden; }
-    if (!opened) return originalUpdateScene.apply(this, arguments);
+    if (runtime) runtime.enforceFrozen();
+    if (!opened) { var result = originalUpdateScene.apply(this, arguments); if (runtime) runtime.enforceFrozen(); return result; }
 };
 function openFromInterpreter() { if (openToolkit() && this && this.setWaitMode) this.setWaitMode('rpgmToolkit'); }
 if (g.PluginManager.registerCommand) { g.PluginManager.registerCommand('RPGMToolkit', 'Open', openFromInterpreter); g.PluginManager.registerCommand('RPGMToolkit', 'Close', closeToolkit); }

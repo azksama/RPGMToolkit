@@ -1,5 +1,11 @@
 # Versions
 
+## 1.2.0 — Liste compacte et édition groupée
+
+Recherche en haut, liste pleine largeur et défilement vertical au doigt, actions compactes sur chaque ligne, édition du type et de la valeur en modale. Sélection entre plusieurs pages, valeur commune et gel des variables, interrupteurs et quantités d’inventaire. Traduction et accès à la sauvegarde dans le footer.
+
+Voir [le guide du panneau compact](plugin/INTERFACE-COMPACTE.md) pour le fonctionnement des gels et la validation.
+
 ## 1.1.0 — Interface mobile
 
 - Palette anthracite et bleue dans le mod, l’installateur et l’icône Android.

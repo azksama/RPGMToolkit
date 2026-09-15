@@ -115,3 +115,53 @@ test('storage failures keep in-memory aliases available',()=>{
     const v=r.list('variables')[0];r.setAlias(v,'Progress');assert.equal(r.title(v),'Progress');assert.equal(r.storageWarning(),true);
 });
 module.exports={fixture};
+
+test('boolean variable values retain false and support typed search',()=>{
+ const {r,g}=fixture();const a=r.list('variables')[0],b=r.list('variables')[1];
+ r.setValue(a,false);r.setValue(b,true);
+ assert.equal(r.value(a),false);assert.equal(g.$gameVariables._data[a.id],false);
+ assert.equal(r.search('variables','','bool').length,2);
+ assert.equal(r.search('variables','','int').some(x=>x.key===a.key),false);
+ r.setValue(a,42);assert.equal(r.value(a),42);r.undo();assert.equal(r.value(a),false);
+});
+
+test('freeze guards game writes, updates its target on edits and undo, then releases',()=>{
+ const {r,g}=fixture();const a=r.list('variables')[0],item=r.list('items')[0],sw=r.list('switches')[0];
+ r.setValue(a,42);r.setValue(item,8);r.freezeMany([a,item,sw],true);
+ g.$gameVariables.setValue(a.id,900);g.$gameParty.gainItem(item.data,-8,false);g.$gameSwitches.setValue(sw.id,true);
+ assert.equal(r.value(a),42);assert.equal(r.value(item),8);assert.equal(r.value(sw),false);
+ assert.equal(Object.keys(g.$gameVariables).includes('setValue'),false);
+ r.setValue(a,70);g.$gameVariables.setValue(a.id,12);assert.equal(r.value(a),70);
+ r.undo();g.$gameVariables.setValue(a.id,12);assert.equal(r.value(a),42);
+ g.$gameVariables._data[a.id]=30;r.enforceFrozen();assert.equal(r.value(a),42);
+ r.freezeMany([a,item,sw],false);g.$gameVariables.setValue(a.id,90);assert.equal(r.value(a),90);
+ assert.equal(Object.hasOwn(g.$gameVariables,'setValue'),false);
+});
+
+test('batch edits validate all entries first and undo as one operation',()=>{
+ const {r}=fixture();const a=r.list('variables')[0],b=r.list('variables')[1],sw=r.list('switches')[0];
+ r.setValue(a,4);r.setValue(b,6);
+ assert.throws(()=>r.setMany([a,sw],99));assert.equal(r.value(a),4);
+ r.setMany([a,b],15);assert.equal(r.value(a),15);assert.equal(r.value(b),15);
+ r.undo();assert.equal(r.value(a),4);assert.equal(r.value(b),6);
+ r.redo();assert.equal(r.value(a),15);assert.equal(r.value(b),15);
+ r.setMany([a,sw],false);assert.equal(r.value(a),false);assert.equal(r.value(sw),false);
+});
+
+test('batch failure rolls earlier writes back and restores frozen targets',()=>{
+ const {r,g}=fixture();const a=r.list('variables')[0],b=r.list('variables')[1];
+ r.setValue(a,3);r.setValue(b,7);
+ const original=g.$gameVariables.setValue;
+ g.$gameVariables.setValue=function(id,value){if(id===b.id&&value===90)throw Error('Rejected');return original.call(this,id,value);};
+ r.freezeMany([a,b],true);
+ assert.throws(()=>r.setMany([a,b],90),/Rejected/);
+ assert.equal(r.value(a),3);assert.equal(r.value(b),7);
+ g.$gameVariables._data[a.id]=99;r.enforceFrozen();assert.equal(r.value(a),3);
+});
+
+test('new save session releases old guards and does not inherit freezes',()=>{
+ const {r,g}=fixture();const a=r.list('variables')[0],old=g.$gameVariables;
+ r.freezeMany([a],true);g.$gameVariables=new g.Game_Variables();r.enforceFrozen();
+ assert.equal(r.frozenCount(),0);assert.equal(Object.hasOwn(old,'setValue'),false);
+ g.$gameVariables.setValue(1,77);assert.equal(r.value(r.list('variables')[0]),77);
+});
