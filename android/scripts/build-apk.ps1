@@ -36,7 +36,7 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "Échec de compilation Rust : $($target.triple)" }
         $destination = Join-Path $appRoot ('src-tauri/gen/android/app/src/main/jniLibs/' + $target.abi)
         New-Item -ItemType Directory -Force -Path $destination | Out-Null
-        Copy-Item -LiteralPath (Join-Path $appRoot ('src-tauri/target/' + $target.triple + '/release/librpgm_installer_lib.so')) -Destination (Join-Path $destination 'librpgm_installer_lib.so') -Force
+        Copy-Item -LiteralPath (Join-Path $metadata.target_directory ($target.triple + '/release/librpgm_installer_lib.so')) -Destination (Join-Path $destination 'librpgm_installer_lib.so') -Force
     }
     Push-Location src-tauri/gen/android
     try {

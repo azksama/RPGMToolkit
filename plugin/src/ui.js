@@ -29,12 +29,22 @@ function allowed() {
     return !scene.isBusy() && !(g.$gamePlayer && g.$gamePlayer.isTransferring()) &&
         (toolkitParams.PlaytestOnly !== 'true' || g.Utils.isOptionValid('test'));
 }
+function mobileLayout() { return g.matchMedia && g.matchMedia('(max-width: 800px), (max-width: 950px) and (max-height: 500px)').matches; }
+function touchInput() { return g.matchMedia && g.matchMedia('(pointer: coarse)').matches; }
+function syncViewport() {
+    if (!opened || !root || !g.visualViewport) return;
+    var v = g.visualViewport;
+    root.style.height = v.height + 'px'; root.style.width = v.width + 'px';
+    root.style.top = v.offsetTop + 'px'; root.style.left = v.offsetLeft + 'px';
+    root.style.bottom = 'auto'; root.style.right = 'auto';
+}
+if (g.visualViewport) { g.visualViewport.addEventListener('resize', syncViewport); g.visualViewport.addEventListener('scroll', syncViewport); }
 function buildRoot() {
     if (root) return;
     var style = document.createElement('style'); style.id = 'rpgm-toolkit-style'; style.textContent = TOOLKIT_CSS; document.head.appendChild(style);
     root = document.createElement('div'); root.className = 'rt'; root.id = 'rpgm-toolkit'; root.hidden = true;
     root.setAttribute('lang', 'fr');
-    root.innerHTML = '<section class="rt-panel" role="dialog" aria-modal="true" aria-labelledby="rt-heading" tabindex="-1"><header class="rt-header"><div class="rt-brand"><span class="rt-logo" aria-hidden="true">R</span><div><div class="rt-eyebrow">RPG MAKER · TOOLKIT</div><h1 id="rt-heading">Votre partie, en détail.</h1></div></div><div class="rt-header-actions"><span class="rt-paused">Ⅱ Jeu en pause</span>' + button('↶ Annuler', 'undo') + button('↷ Rétablir', 'redo') + button('Fermer <kbd>' + hotkey + '</kbd>', 'close') + '</div></header><div class="rt-body"><nav class="rt-nav" aria-label="Catégories"></nav><main class="rt-main"></main></div><footer class="rt-footer"><div class="rt-status" role="status" aria-live="polite"></div><span class="rt-footer-hint"><kbd>Ctrl F</kbd> Rechercher · <kbd>Échap</kbd> Fermer</span></footer></section>';
+    root.innerHTML = '<section class="rt-panel" role="dialog" aria-modal="true" aria-labelledby="rt-heading" tabindex="-1"><header class="rt-header"><div class="rt-brand"><span class="rt-logo" aria-hidden="true">R</span><div><div class="rt-eyebrow">RPG MAKER · TOOLKIT</div><h1 id="rt-heading">RPGM Toolkit</h1></div></div><div class="rt-header-actions"><span class="rt-paused">Ⅱ Jeu en pause</span>' + button('↶ Annuler', 'undo') + button('↷ Rétablir', 'redo') + button('Fermer <kbd>' + hotkey + '</kbd>', 'close') + '</div></header><div class="rt-body"><nav class="rt-nav" aria-label="Catégories"></nav><main class="rt-main"></main></div><footer class="rt-footer"><div class="rt-status" role="status" aria-live="polite"></div><span class="rt-footer-hint"><kbd>Ctrl F</kbd> Rechercher · <kbd>Échap</kbd> Fermer</span></footer></section>';
     document.body.appendChild(root);
     ['keydown', 'keyup', 'keypress', 'mousedown', 'mouseup', 'mousemove', 'click', 'dblclick', 'contextmenu', 'touchstart', 'touchmove', 'touchend', 'wheel', 'pointerdown', 'pointerup'].forEach(function(type) {
         root.addEventListener(type, function(event) { event.stopPropagation(); }, { passive: type.indexOf('touch') === 0 || type === 'wheel' });
@@ -77,12 +87,13 @@ function renderNav() {
     $('.rt-nav').innerHTML = nav;
 }
 function render() {
+    root.classList.remove('rt-detail-open');
     clearTimeout(searchTimer);
     renderNav(); updateHistoryButtons();
     if (tab === 'party') { renderParty(); return; }
     if (tab === 'translations') { renderTranslations(); return; }
     if (tab === 'history') { renderHistory(); return; }
-    $('.rt-main').innerHTML = '<div class="rt-toolbar"><div class="rt-title-line"><div><h2>' + esc(labels[tab]) + '</h2><p class="rt-muted rt-small" style="margin:0">' + esc(hints[tab]) + '</p></div></div><div class="rt-controls"><label class="rt-search"><span class="rt-sr">Rechercher par nom, ID ou valeur</span><input id="rt-search" type="search" placeholder="Rechercher un nom, #ID, value:42…" value="' + esc(query) + '"></label><label><span class="rt-sr">Filtrer les entrées</span><select id="rt-filter"><option value="all">Tout afficher</option><option value="named">Avec un nom</option><option value="favorites">Favoris</option><option value="active">Non nul / possédé / ON</option><option value="changed">Changé depuis le repère</option></select></label></div><div class="rt-controls" style="margin-top:8px"><label class="rt-checkbox rt-small"><input type="checkbox" id="rt-english"' + (runtime.prefs.english ? ' checked' : '') + '>Noms anglais</label>' + button('Traduire cette page', 'translate-page') + button('Créer un repère', 'baseline') + button('Actualiser', 'refresh') + '</div></div><div class="rt-workbench"><section class="rt-results" aria-label="Résultats"><div class="rt-columns"><span>Nom / identifiant</span><span>Valeur</span></div><ul class="rt-list" aria-label="Entrées"></ul><div class="rt-pagination"><span id="rt-count" aria-live="polite"></span><div>' + button('‹', 'prev') + ' ' + button('›', 'next') + '</div></div></section><aside class="rt-detail" aria-label="Détails et édition"></aside></div>';
+    $('.rt-main').innerHTML = '<div class="rt-toolbar"><div class="rt-title-line"><div><h2>' + esc(labels[tab]) + '</h2><p class="rt-muted rt-small" style="margin:0">' + esc(hints[tab]) + '</p></div></div><div class="rt-controls"><label class="rt-search"><span class="rt-sr">Rechercher par nom, ID ou valeur</span><input id="rt-search" type="search" placeholder="Rechercher un nom, #ID, value:42…" value="' + esc(query) + '"></label><label><span class="rt-sr">Filtrer les entrées</span><select id="rt-filter"><option value="all">Tout afficher</option><option value="named">Avec un nom</option><option value="favorites">Favoris</option><option value="active">Non nul / possédé / ON</option><option value="changed">Changé depuis le repère</option></select></label></div><details class="rt-tools"><summary>Options et traduction</summary><div class="rt-controls" style="margin-top:8px"><label class="rt-checkbox rt-small"><input type="checkbox" id="rt-english"' + (runtime.prefs.english ? ' checked' : '') + '>Noms anglais</label>' + button('Traduire cette page', 'translate-page') + button('Créer un repère', 'baseline') + button('Actualiser', 'refresh') + '</div></details></div><div class="rt-workbench"><section class="rt-results" aria-label="Résultats"><div class="rt-columns"><span>Nom / identifiant</span><span>Valeur</span></div><ul class="rt-list" aria-label="Entrées"></ul><div class="rt-pagination"><span id="rt-count" aria-live="polite"></span><div>' + button('‹', 'prev') + ' ' + button('›', 'next') + '</div></div></section><aside class="rt-detail" aria-label="Détails et édition"></aside></div>';
     $('#rt-filter').value = filter;
     $('[data-action="prev"]').setAttribute('aria-label', 'Page précédente');
     $('[data-action="next"]').setAttribute('aria-label', 'Page suivante');
@@ -130,7 +141,7 @@ function renderDetail() {
     var detail = $('.rt-detail'); if (!detail) return;
     if (!selected) { detail.innerHTML = empty('Choisissez une entrée', 'Consultez son nom d’origine, sa valeur et ses commandes ici.'); return; }
     var r = selected, kind = r.kind, v = runtime.value(r);
-    var html = '<span class="rt-id">' + esc(labels[kind]) + ' · #' + esc(r.id) + '</span><h3>' + esc(runtime.title(r)) + '</h3><p class="rt-muted rt-small">Nom d’origine : ' + esc(r.original || '(sans nom)') + '</p>';
+    var html = button('‹ Retour aux résultats', 'back-results', 'rt-back') + '<span class="rt-id">' + esc(labels[kind]) + ' · #' + esc(r.id) + '</span><h3>' + esc(runtime.title(r)) + '</h3><p class="rt-muted rt-small">Nom d’origine : ' + esc(r.original || '(sans nom)') + '</p>';
     if (r.data && r.data.description) html += '<p class="rt-small">' + esc(r.data.description) + '</p>';
     html += '<div class="rt-divider"></div>';
     if (kind === 'variables') {
@@ -224,7 +235,8 @@ function act(action, node) {
     var r, id;
     if (action === 'close') { closeToolkit(); return; }
     if (action === 'tab') { tab = node.getAttribute('data-tab'); page = 0; query = ''; filter = 'all'; selected = null; render(); return; }
-    if (action === 'select') { selected = found[Number(node.getAttribute('data-index'))]; renderList(); renderDetail(); var chosen = $('.rt-detail input, .rt-detail select, .rt-detail textarea, .rt-detail button'); if (chosen) chosen.focus(); return; }
+    if (action === 'back-results') { root.classList.remove('rt-detail-open'); var row = $('.rt-selected .rt-select'); if (row) row.focus(); return; }
+    if (action === 'select') { root.classList.add('rt-detail-open'); selected = found[Number(node.getAttribute('data-index'))]; renderList(); renderDetail(); var chosen = mobileLayout() ? $('.rt-back') : $('.rt-detail input, .rt-detail select, .rt-detail textarea, .rt-detail button'); if (chosen) chosen.focus(); return; }
     if (action === 'star') { r = found[Number(node.getAttribute('data-index'))]; runtime.prefs.favorites[r.key] = !runtime.prefs.favorites[r.key]; runtime.savePrefs(); renderNav(); renderList(); if (runtime.storageWarning()) say('Favori conservé en mémoire seulement : stockage local indisponible.', true); return; }
     if (action === 'prev' || action === 'next') { page += action === 'next' ? 1 : -1; renderList(); $('.rt-list').scrollTop = 0; $('[data-action="' + action + '"]').focus(); return; }
     if (action === 'baseline') { say(runtime.capture() + ' valeurs mémorisées. Reprenez le jeu, puis utilisez le filtre « Changé depuis le repère ».'); renderList(); return; }
@@ -275,7 +287,7 @@ function openToolkit() {
         openVariables = g.$gameVariables; opened = true; root.hidden = false; if (launch) launch.hidden = true;
         clearInput(); render();
         say(runtime.storageWarning() ? 'Stockage local indisponible : exportez vos traductions pour les conserver.' : 'Prêt · Les modifications s’appliquent à la partie en cours.');
-        var focus = $('#rt-search') || $('.rt-panel'); focus.focus(); return true;
+        syncViewport(); var focus = touchInput() ? $('.rt-panel') : ($('#rt-search') || $('.rt-panel')); focus.focus(); return true;
     } catch (e) { opened = false; if (root) root.hidden = true; clearInput(); if (g.console) g.console.error('RPGMToolkit: ' + e.message); return false; }
 }
 function refreshSceneWindows() {
@@ -292,7 +304,7 @@ function closeToolkit() {
     if (previousFocus && document.contains(previousFocus)) previousFocus.focus();
 }
 function toggleToolkit() { return opened ? closeToolkit() : openToolkit(); }
-g.RPGMToolkit = { version: '1.0.1', open: openToolkit, close: closeToolkit, toggle: toggleToolkit, isOpen: function() { return opened; } };
+g.RPGMToolkit = { version: '1.1.0', open: openToolkit, close: closeToolkit, toggle: toggleToolkit, isOpen: function() { return opened; } };
 var heldCloseKey = null;
 g.addEventListener('keydown', function(event) {
     var key = event.key || ({ 117: 'F6', 118: 'F7', 121: 'F10', 27: 'Escape' }[event.keyCode]);
@@ -301,7 +313,7 @@ g.addEventListener('keydown', function(event) {
         if (opened || allowed()) { event.preventDefault(); event.stopImmediatePropagation(); heldCloseKey = key; if (!event.repeat) toggleToolkit(); } return;
     }
     if (!opened) return;
-    if (key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); heldCloseKey = key; closeToolkit(); return; }
+    if (key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); heldCloseKey = key; if (mobileLayout() && root.classList.contains('rt-detail-open')) { root.classList.remove('rt-detail-open'); var row = $('.rt-selected .rt-select'); if (row) row.focus(); } else closeToolkit(); return; }
     if ((event.ctrlKey || event.metaKey) && (key === 'f' || key === 'F')) { event.preventDefault(); event.stopImmediatePropagation(); if ($('#rt-search')) $('#rt-search').focus(); return; }
     if (key === 'Tab') {
         var focusables = Array.prototype.slice.call(root.querySelectorAll('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href]')).filter(function(el) { return el.offsetWidth || el.offsetHeight; });

@@ -1,6 +1,6 @@
 # RPGM Toolkit
 
-Mod intégré pour RPG Maker MV/MZ et installateur Android **Rust + Tauri 2**, version **1.0.1**.
+Mod intégré pour RPG Maker MV/MZ et installateur Android **Rust + Tauri 2**, version **1.1.0**.
 
 Recherche et édition de variables, alias anglais pour l’affichage, recherche et ajout d’objets, armes et armures. L’application Android détecte un jeu fourni en ZIP ou en dossier, installe le mod embarqué, permet sa mise à jour et sa désinstallation, avec sauvegardes et restauration.
 
@@ -41,3 +41,5 @@ Après une mise à jour de l’APK, sélectionner **Mod inclus**, puis le jeu et
 Les essais du chargement MV/MZ utilisent des fixtures ; l’installation Android a été vérifiée sur émulateur. La validation dans chaque jeu réel et dans JoiPlay reste distincte.
 
 Licence MIT. Application indépendante de RPG Maker et de JoiPlay.
+
+Après compilation du frontend Android, `npm run test:mobile` à la racine vérifie les formats mobiles et l’accessibilité. Voir [les nouveautés 1.1.0](CHANGELOG.md).

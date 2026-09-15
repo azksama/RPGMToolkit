@@ -1,13 +1,15 @@
 {
   "name": "rpgm-toolkit",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "private": true,
   "scripts": {
     "build:mod": "node plugin/build.cjs",
     "test": "node --test plugin/tests/core.test.cjs plugin/tests/translation.test.cjs android/tests/scene-lifecycle.test.cjs",
-    "test:installer": "pwsh -NoProfile -ExecutionPolicy Bypass -File plugin/tests/installer.test.ps1"
+    "test:installer": "pwsh -NoProfile -ExecutionPolicy Bypass -File plugin/tests/installer.test.ps1",
+    "test:mobile": "node --test android/tests/mobile-layout.test.cjs"
   },
   "devDependencies": {
+    "axe-core": "^4.13.0",
     "playwright": "1.58.2"
   }
 }
