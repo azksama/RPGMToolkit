@@ -43,6 +43,7 @@ test('compact mobile layouts: swipe list, inline actions, bulk editing, modals a
    assert(await page.evaluate(()=>scrollY===0));
    await page.goto(base+'/plugin/demo/index.html');
    await page.getByRole('button',{name:'Ouvrir le panneau · F6'}).click();
+   await page.locator('[data-action="tool-editors"]').click();
    assert.notEqual(await page.evaluate(()=>document.activeElement.id),'rt-search','touch open must not summon keyboard');
    const row=await page.locator('.rt-row').first().boundingBox();assert(row.height<=38);
    const list=await page.locator('.rt-list').boundingBox();assert(list.width>=width-2);assert(list.height>=height*.50);
@@ -101,7 +102,7 @@ test('compact mobile layouts: swipe list, inline actions, bulk editing, modals a
    await page.setViewportSize({width:390,height:300});await page.waitForTimeout(80);
    assert((await page.locator('.rt-modal-dialog').boundingBox()).height<=300);
    await page.setViewportSize({width,height});await page.waitForTimeout(80);
-   await page.getByRole('button',{name:'Fermer la fenêtre'}).click();
+   await page.getByRole('button',{name:'Retour au menu précédent'}).click();
    assert(await page.evaluate(()=>document.querySelector('.rt-panel').scrollWidth<=innerWidth+1),'mod overflow '+width);
    await accessible(page);
    assert.deepEqual(errors,[]);
@@ -110,9 +111,9 @@ test('compact mobile layouts: swipe list, inline actions, bulk editing, modals a
    await page.locator('#rt-search').fill('#1');await page.waitForTimeout(160);
    await page.locator('[data-action="select"]').first().click();
    await page.locator('#rt-alias').fill('Progress');await page.getByRole('button',{name:'Enregistrer le nom'}).click();
-   await page.getByRole('button',{name:'Fermer la fenêtre'}).click();assert.equal(await page.locator('.rt-row-title').textContent(),'Progress');
+   await page.getByRole('button',{name:'Retour au menu précédent'}).click();assert.equal(await page.locator('.rt-row-title').textContent(),'Progress');
    await page.getByRole('button',{name:'Traduction',exact:true}).click();assert(await page.locator('.rt-modal').isVisible());
-   await page.getByRole('button',{name:'Fermer la fenêtre'}).click();
+   await page.getByRole('button',{name:'Retour au menu précédent'}).click();
    await page.evaluate(()=>{$gameSystem.isSaveEnabled=()=>false;});
    await page.getByRole('button',{name:'Enregistrer',exact:true}).click();assert(await page.evaluate(()=>RPGMToolkit.isOpen()));
    await page.evaluate(()=>{$gameSystem.isSaveEnabled=()=>true;});

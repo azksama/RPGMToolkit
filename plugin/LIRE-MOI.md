@@ -65,9 +65,9 @@ Deux possibilités :
 - **Hors ligne** : sélectionnez une entrée, renseignez **Nom anglais**, puis **Enregistrer le nom**. Un champ vide supprime son alias.
 - **En ligne** : cliquez sur **Traduire en ligne** pour une entrée ou **Traduire cette page**. Choisissez la langue d’origine, puis **Envoyer les noms à MyMemory**. Le plugin envoie uniquement les noms sélectionnés à ce service tiers, jamais les valeurs des variables. Il ne contacte aucun service avant ce clic.
 
-Les demandes partent une par une, avec cache, déduplication des noms identiques dans le lot, délai entre requêtes et arrêt manuel. La fermeture du panneau annule la requête en cours. Les noms déjà traduits restent disponibles hors ligne. Pour remplacer une traduction existante, effacez d’abord son alias ou saisissez une correction.
+Les demandes partent par trois au maximum, sans délai artificiel, avec déduplication des noms identiques et arrêt manuel. Choisissez la sélection, toute la catégorie ou tout le jeu. Chaque groupe reçu est enregistré immédiatement. La fermeture du panneau annule toutes les requêtes en cours. Les noms déjà traduits restent disponibles hors ligne. Pour remplacer une traduction existante, effacez d’abord son alias ou saisissez une correction.
 
-MyMemory est disponible sans clé, sous réserve de son service et de ses quotas. Sa documentation annonce actuellement **5 000 caractères par jour** en usage anonyme et **500 octets par nom**. Les erreurs réseau, délais et quotas sont affichés ; aucun contournement de quota n’est effectué. Voir les [spécifications](https://mymemory.translated.net/doc/spec.php) et les [limites du service](https://mymemory.translated.net/doc/usagelimits.php). Une traduction automatique de noms internes peut être approximative ; corrigez l’alias si nécessaire.
+MyMemory est disponible sans clé, sous réserve de son service et de ses quotas. La limite par nom est de **500 octets** ; le quota de caractères est imposé par le service. Les erreurs réseau, délais et quotas sont affichés ; aucun contournement de quota n’est effectué. Voir les [spécifications](https://mymemory.translated.net/doc/spec.php) et les [limites du service](https://mymemory.translated.net/doc/usagelimits.php). Une traduction automatique de noms internes peut être approximative ; corrigez l’alias si nécessaire.
 
 Le cache est conservé dans le stockage local du navigateur/NW.js, séparément pour chaque chemin de jeu et titre. Il ne s’ajoute pas à la sauvegarde du jeu. Un renommage du jeu ou son déplacement peut changer la clé de stockage ; exportez votre dictionnaire pour le transférer. Si le stockage est interdit ou saturé, les traductions restent en mémoire pendant la session et un message invite à les exporter.
 
@@ -151,3 +151,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install-RPGMToolkit.ps
 - Tests réussis sur les classes officielles MV, sur des scénarios d’interface simulés MV/MZ et sur l’installateur Windows. **Aucun jeu réel de l’utilisateur ni runtime MZ complet n’a été fourni pour une validation de bout en bout.** Voir `VALIDATION.md`.
 
 Le plugin est un outil indépendant ; il n’est pas édité ni approuvé par l’éditeur de RPG Maker.
+
+## Toolbox 1.3.0
+
+Le bouton **Toolbox** en haut à gauche ouvre désormais le menu global. Choisissez **Éditeurs** pour retrouver les listes, ou un sous-menu dédié. Voir [le guide Toolbox](TOOLBOX.md) pour les traductions en parallèle, Godmode, No Clip, HP/MP, Stats et Téléportation.

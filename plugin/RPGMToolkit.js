@@ -1,6 +1,6 @@
 /*:
  * @target MZ
- * @plugindesc v1.2.0 (MV/MZ) — Variables, inventaire, acteurs et traductions anglaises.
+ * @plugindesc v1.3.0 (MV/MZ) — Variables, inventaire, acteurs et traductions anglaises.
  * @author RPGM Toolkit
  *
  * @param Hotkey
@@ -34,9 +34,10 @@
  * @text Fermer le Toolkit
  *
  * @help
- * RPGM Toolkit 1.2.0 — RPG Maker MV 1.6+ / MZ
+ * RPGM Toolkit 1.3.0 — RPG Maker MV 1.6+ / MZ
  * Copiez ce fichier dans js/plugins, puis activez RPGMToolkit en dernier
  * dans le gestionnaire de plugins. Chargez une partie et appuyez sur F6.
+ * Toolbox ouvre le menu global. Choisissez Éditeurs ou un outil de jeu.
  * Disponible sur la carte ; le jeu est mis en pause pendant l'édition.
  *
  * Variables : noms, ID, value:42, id:10-50, favoris, repère de comparaison.
@@ -49,7 +50,9 @@
  * Les noms anglais sont des alias d'affichage stockés localement par jeu.
  * Les données d'origine ne sont jamais renommées. Les alias peuvent être
  * saisis ou importés hors ligne. MyMemory traduit sur clic explicite ;
- * seuls les noms choisis sont envoyés. Internet et quota disponible requis.
+ * seuls les noms choisis sont envoyés, avec trois requêtes simultanées.
+ * Tout traduire couvre les noms du catalogue, déjà traduits exclus.
+ * Internet et quota disponible requis. Résultats conservés localement.
  *
  * MV : commande de plugin RPGMToolkit Open / RPGMToolkit Close
  * MZ : commandes Ouvrir / Fermer le Toolkit
@@ -90,7 +93,7 @@ function createToolkitRuntime(g, storage) {
         if (typeof saved.english === 'boolean') prefs.english = saved.english;
         if (/^[a-z]{2}(-[A-Za-z]{2,4})?$/.test(saved.source || '')) prefs.source = saved.source;
         Object.keys(saved.favorites || {}).slice(0, 50000).forEach(function(k) { if (/^[a-zA-Z]+:[0-9]+(?:\.[0-9]+\.[A-D])?$/.test(k)) prefs.favorites[k] = !!saved.favorites[k]; });
-        Object.keys(saved.aliases || {}).slice(0, 50000).forEach(function(k) { if (/^[a-zA-Z]+:[0-9]+(?:\.[0-9]+\.[A-D])?$/.test(k) && validAlias(saved.aliases[k])) prefs.aliases[k] = saved.aliases[k]; });
+        Object.keys(saved.aliases || {}).forEach(function(k) { if (/^[a-zA-Z]+:[0-9]+(?:\.[0-9]+\.[A-D])?$/.test(k) && validAlias(saved.aliases[k])) prefs.aliases[k] = saved.aliases[k]; });
     } catch (e) { storageWarning = true; }
     function ensureSession() {
         if (session !== g.$gameVariables) { removeHooks(); frozen = {}; session = g.$gameVariables; history = []; redo = []; log = []; baseline = {}; cache = {}; }
@@ -360,13 +363,16 @@ function createToolkitRuntime(g, storage) {
         if (a.equips()[slot] !== item) throw new Error('Le moteur a refusé cet équipement.');
         history = []; redo = []; note(a.name() + ' · équipement', old && old.name || '—', item && item.name || '—', false);
     }
-    function setAlias(r, text) {
-        assertRecord(r);
+    function setAliases(records, text) {
+        records.forEach(assertRecord);
         if (typeof text !== 'string' || text.length > 2000) throw new Error('Traduction invalide.');
-        if (text.trim()) prefs.aliases[r.key] = { original: r.original, english: text.trim() };
-        else delete prefs.aliases[r.key];
+        records.forEach(function(r) {
+            if (text.trim()) prefs.aliases[r.key] = { original: r.original, english: text.trim() };
+            else delete prefs.aliases[r.key];
+        });
         savePrefs();
     }
+    function setAlias(r, text) { setAliases([r], text); }
     function importAliases(payload) {
         if (!payload || payload.format !== 'rpgm-toolkit-translations-v1' || !Array.isArray(payload.entries) || payload.entries.length > 50000) throw new Error('Dictionnaire JSON non reconnu.');
         var lookup = {}, staged = [], skipped = 0;
@@ -389,29 +395,154 @@ function createToolkitRuntime(g, storage) {
         canUndo: function() { ensureSession(); return history.length > 0; }, canRedo: function() { ensureSession(); return redo.length > 0; },
         log: function() { ensureSession(); return log; }, capture: capture, changed: changed,
         refresh: function() { ensureSession(); cache = {}; }, savePrefs: savePrefs, storageWarning: function() { return storageWarning; },
-        setAlias: setAlias, importAliases: importAliases,
+        setAlias: setAlias, setAliases: setAliases, importAliases: importAliases,
         exportAliases: function() {
             return { format: 'rpgm-toolkit-translations-v1', project: project, entries: Object.keys(prefs.aliases).map(function(k) { return { key: k, original: prefs.aliases[k].original, english: prefs.aliases[k].english }; }) };
         }
     };
 }
 
-/* Online translation is requested explicitly; names only, never variable values. */
+/* Session-scoped game tools. Wrappers are removed when disabled or on save load. */
+function createToolkitTools(g) {
+    'use strict';
+    var session = g.$gameVariables, god = false, noclip = false, hooks = [], epoch = 0;
+    function integer(n, min, max) {
+        if (!/^-?\d+$/.test(String(n).trim()) || !isFinite(Number(n)) || Number(n) < min || Number(n) > max) throw new Error('Entier attendu entre ' + min + ' et ' + max + '.');
+        return Number(n);
+    }
+    function members() { return g.$gameParty.allMembers ? g.$gameParty.allMembers() : g.$gameParty.members(); }
+    function partyActor(a) { return typeof a.actorId === 'function' && (g.$gameParty._actors ? g.$gameParty._actors.indexOf(a.actorId()) >= 0 : members().indexOf(a) >= 0); }
+    function wrap(object, name, group, factory) {
+        if (!object || typeof object[name] !== 'function') return;
+        var descriptor = Object.getOwnPropertyDescriptor(object, name), original = object[name], wrapped = factory(original);
+        Object.defineProperty(object, name, { configurable: true, writable: true, enumerable: false, value: wrapped });
+        hooks.push({ object: object, name: name, descriptor: descriptor, original: original, wrapped: wrapped, group: group });
+    }
+    function remove(group) {
+        hooks = hooks.filter(function(h) {
+            if (group && h.group !== group) return true;
+            if (h.object[h.name] === h.wrapped) {
+                if (h.descriptor) Object.defineProperty(h.object, h.name, h.descriptor); else delete h.object[h.name];
+            }
+            return false;
+        });
+    }
+    function sync() {
+        if (session !== g.$gameVariables) { god = false; noclip = false; remove(); session = g.$gameVariables; epoch++; }
+    }
+    function ensureMap() {
+        sync();
+        if (g.$gameParty.inBattle() || g.$gamePlayer.isTransferring() || g.$gameMap.isEventRunning() || g.$gameMessage.isBusy()) throw new Error('Attendez la fin du combat, du dialogue ou de l’événement.');
+    }
+    function setGod(active) {
+        sync(); if (god === active) return;
+        if (!active) { god = false; remove('god'); return; }
+        if (!g.Game_BattlerBase || !g.Game_Battler) throw new Error('API des combattants indisponible dans ce jeu.');
+        god = true;
+        try {
+            wrap(g.Game_BattlerBase.prototype, 'setHp', 'god', function(original) { return function(value) { return original.call(this, god && partyActor(this) ? this.mhp : value); }; });
+            wrap(g.Game_Battler.prototype, 'addState', 'god', function(original) { return function(id) { if (god && partyActor(this) && id === this.deathStateId()) return; return original.apply(this, arguments); }; });
+            wrap(g.Game_BattlerBase.prototype, 'refresh', 'god', function(original) { return function() {
+                if (god && partyActor(this)) { this._hp = this.mhp; this.eraseState(this.deathStateId()); }
+                var result = original.apply(this, arguments);
+                if (god && partyActor(this)) { this._hp = this.mhp; this.eraseState(this.deathStateId()); }
+                return result;
+            }; });
+            members().forEach(function(a) { a.setHp(a.mhp); a.removeState(a.deathStateId()); });
+        } catch (e) { god = false; remove('god'); throw e; }
+    }
+    function setNoclip(active) {
+        sync(); if (noclip === active) return;
+        if (!active) { noclip = false; remove('noclip'); return; }
+        if (typeof g.$gamePlayer.isThrough !== 'function') throw new Error('API de déplacement indisponible.');
+        noclip = true;
+        try { wrap(g.$gamePlayer, 'isThrough', 'noclip', function(original) { return function() { return noclip || original.apply(this, arguments); }; }); }
+        catch (e) { noclip = false; remove('noclip'); throw e; }
+    }
+    function tick() {
+        sync();
+        if (god) members().forEach(function(a) { if (a.hp < a.mhp || a.isStateAffected(a.deathStateId())) { a.setHp(a.mhp); a.removeState(a.deathStateId()); } });
+    }
+    function targets(id) {
+        var list = members();
+        if (String(id) === 'all') return list;
+        id = integer(id, 1, 999999);
+        list = list.filter(function(a) { return a.actorId() === id; });
+        if (!list.length) throw new Error('Acteur absent de l’équipe.');
+        return list;
+    }
+    function resources(id, hp, mp, tp, full) {
+        ensureMap();
+        var list = targets(id);
+        list.forEach(function(a) { if (!full) { integer(hp, 0, a.mhp); integer(mp, 0, a.mmp); integer(tp, 0, a.maxTp()); } });
+        list.forEach(function(a) { a.setHp(full ? a.mhp : Number(hp)); a.setMp(full ? a.mmp : Number(mp)); a.setTp(full ? a.maxTp() : Number(tp)); });
+        return list.length;
+    }
+    function stat(id, param, next) {
+        ensureMap(); var a = targets(id)[0];
+        if (param === 'level') a.changeLevel(integer(next, 1, a.maxLevel()), false);
+        else if (param === 'exp') a.changeExp(integer(next, 0, 999999999), false);
+        else { param = integer(param, 0, 7); next = integer(next, -999999, 999999); a.addParam(param, next - (a._paramPlus[param] || 0)); }
+        return a;
+    }
+    function maps(query) {
+        query = String(query || '').toLowerCase();
+        return (g.$dataMapInfos || []).filter(function(m) { return m && (String(m.id) + ' ' + m.name).toLowerCase().indexOf(query) >= 0; }).slice(0, 200);
+    }
+    function loadMap(id) {
+        sync(); id = integer(id, 1, 999999);
+        if (!g.$dataMapInfos || !g.$dataMapInfos[id]) return Promise.reject(new Error('Carte inconnue.'));
+        var token = epoch;
+        function metadata(data) {
+            sync(); if (token !== epoch) throw new Error('La partie a changé.');
+            return { id:id, width:integer(data.width,1,10000), height:integer(data.height,1,10000), epoch:token };
+        }
+        if (id === g.$gameMap.mapId() && g.$dataMap && g.$dataMap.width) return Promise.resolve(metadata(g.$dataMap));
+        return new Promise(function(resolve,reject) {
+            var xhr = new g.XMLHttpRequest();
+            xhr.open('GET', 'data/Map' + ('000' + id).slice(-Math.max(3,String(id).length)) + '.json'); xhr.timeout = 15000;
+            xhr.onload = function() { try { if (xhr.status !== 200 && !(xhr.status === 0 && xhr.responseText)) throw new Error('Impossible de lire la carte.'); resolve(metadata(JSON.parse(xhr.responseText))); } catch(e) { reject(e); } };
+            xhr.onerror = function() { reject(new Error('La carte est inaccessible.')); };
+            xhr.ontimeout = function() { reject(new Error('Le chargement de la carte a expiré.')); };
+            xhr.send();
+        });
+    }
+    function teleport(map, x, y, direction) {
+        ensureMap();
+        if (!map || map.epoch !== epoch || !g.$dataMapInfos[map.id]) throw new Error('Chargez d’abord la carte de destination.');
+        x = integer(x,0,map.width-1); y = integer(y,0,map.height-1); direction = integer(direction,0,8);
+        if ([0,2,4,6,8].indexOf(direction) < 0) throw new Error('Direction invalide.');
+        g.$gamePlayer.reserveTransfer(map.id,x,y,direction,0);
+    }
+    return { sync:sync, tick:tick, setGod:setGod, setNoclip:setNoclip, members:members, resources:resources, stat:stat, maps:maps, loadMap:loadMap, teleport:teleport,
+        state:function() { sync(); return { god:god, noclip:noclip }; } };
+}
+
+/* Explicit translation of names only. Three bounded workers, no artificial delay. */
 function createToolkitTranslator(runtime, g) {
     'use strict';
-    var token = 0, current = null, running = false;
-    function cancel() {
-        token++;
-        running = false;
-        if (current) { current.abort(); current = null; }
+    var active = null;
+    function stopped() { return new Error('Traduction arrêtée.'); }
+    function finish(run, error) {
+        if (run.finished) return;
+        run.finished = true;
+        if (active === run) active = null;
+        run.requests.slice().forEach(function(xhr) { xhr.abort(); });
+        run.requests = [];
+        if (error) run.reject(error); else run.resolve(run.completed);
     }
-    function request(name, source) {
+    function cancel() { if (active) finish(active, stopped()); }
+    function check(run) {
+        if (run.finished || active !== run || run.session !== g.$gameVariables) throw stopped();
+    }
+    function request(run, name, source) {
         return new Promise(function(resolve, reject) {
-            var xhr = new g.XMLHttpRequest(); current = xhr;
+            var xhr = new g.XMLHttpRequest(); run.requests.push(xhr);
+            function release() { var i = run.requests.indexOf(xhr); if (i >= 0) run.requests.splice(i, 1); }
             xhr.open('GET', 'https://api.mymemory.translated.net/get?q=' + encodeURIComponent(name) + '&langpair=' + encodeURIComponent(source + '|en'), true);
             xhr.timeout = 15000;
             xhr.onload = function() {
-                if (current === xhr) current = null;
+                release();
                 try {
                     if (xhr.status !== 200) throw new Error('Service indisponible (HTTP ' + xhr.status + ').');
                     var response = JSON.parse(xhr.responseText);
@@ -421,43 +552,113 @@ function createToolkitTranslator(runtime, g) {
                     resolve(translated);
                 } catch (e) { reject(e); }
             };
-            xhr.onerror = function() { if (current === xhr) current = null; reject(new Error('Connexion impossible. Vérifiez le réseau ou les restrictions CORS du jeu.')); };
-            xhr.ontimeout = function() { if (current === xhr) current = null; reject(new Error('Le service met trop de temps à répondre.')); };
-            xhr.onabort = function() { reject(new Error('Traduction arrêtée.')); };
+            xhr.onerror = function() { release(); reject(new Error('Connexion impossible. Vérifiez le réseau ou les restrictions CORS du jeu.')); };
+            xhr.ontimeout = function() { release(); reject(new Error('Le service met trop de temps à répondre.')); };
+            xhr.onabort = function() { release(); reject(stopped()); };
             xhr.send();
         });
     }
     function translate(records, source, progress) {
-        if (running) return Promise.reject(new Error('Une traduction est déjà en cours.'));
+        if (active) return Promise.reject(new Error('Une traduction est déjà en cours.'));
         if (!/^[a-z]{2}(-[A-Za-z]{2,4})?$/.test(source)) return Promise.reject(new Error('Choisissez la langue d’origine.'));
-        var batch = records.slice(0, 80).filter(function(r) { return r.original.trim() && !runtime.alias(r); });
-        var myToken = ++token, session = g.$gameVariables, i = 0, completed = 0, memo = Object.create(null);
-        running = true;
-        function next() {
-            if (myToken !== token || session !== g.$gameVariables) throw new Error('Traduction arrêtée.');
-            if (i >= batch.length) return completed;
-            var r = batch[i++], original = r.original;
-            if (new Blob([original]).size > 500) throw new Error('Un nom dépasse la limite de 500 octets du service. Utilisez un alias manuel.');
-            var promise = source === 'en' ? Promise.resolve(original) : (memo[original] ? Promise.resolve(memo[original]) : request(original, source));
-            return promise.then(function(english) {
-                if (myToken !== token || session !== g.$gameVariables) throw new Error('Traduction arrêtée.');
-                memo[original] = english;
-                if (!runtime.alias(r)) runtime.setAlias(r, english);
-                completed++; progress(completed, batch.length);
-                return new Promise(function(resolve) { g.setTimeout(resolve, 400); });
-            }).then(next);
-        }
-        return Promise.resolve().then(next).then(function(n) { if (myToken === token) running = false; return n; }, function(e) { if (myToken === token) running = false; throw e; });
+        var run = { session: g.$gameVariables, requests: [], finished: false, completed: 0 };
+        active = run;
+        return new Promise(function(resolve, reject) {
+            run.resolve = resolve; run.reject = reject;
+            Promise.resolve().then(function() {
+                check(run);
+                var groups = [], byName = Object.create(null), seen = Object.create(null), total = 0, index = 0, workers = 0;
+                records.forEach(function(r) {
+                    if (seen[r.key] || !r.original.trim() || runtime.alias(r)) return;
+                    seen[r.key] = true;
+                    if (source !== 'en' && new Blob([r.original]).size > 500) throw new Error('Un nom dépasse la limite de 500 octets du service. Utilisez un alias manuel.');
+                    if (!byName[r.original]) { byName[r.original] = []; groups.push(byName[r.original]); }
+                    byName[r.original].push(r); total++;
+                });
+                function worker() {
+                    try {
+                        check(run);
+                        if (index >= groups.length) { if (--workers === 0) finish(run); return; }
+                        var group = groups[index++], original = group[0].original;
+                        var result = source === 'en' ? Promise.resolve(original) : request(run, original, source);
+                        result.then(function(english) {
+                            check(run);
+                            var missing = group.filter(function(r) { return !runtime.alias(r); });
+                            if (missing.length) runtime.setAliases(missing, english);
+                            run.completed += group.length;
+                            if (progress) progress(run.completed, total);
+                            worker();
+                        }).catch(function(e) { finish(run, e); });
+                    } catch (e) { finish(run, e); }
+                }
+                if (!groups.length) { finish(run); return; }
+                workers = Math.min(3, groups.length);
+                var count = workers;
+                for (var i = 0; i < count; i++) worker();
+            }).catch(function(e) { finish(run, e); });
+        });
     }
-    return { translate: translate, cancel: cancel, busy: function() { return running; } };
+    return { translate: translate, cancel: cancel, busy: function() { return !!active; } };
 }
 
-var TOOLKIT_CSS = "/* Compact full-screen editor. No width-dependent sidebar or oversized touch theme. */\r\n.rt,.rt-launch { box-sizing:border-box; font:13px/1.4 system-ui,'Segoe UI',Arial,sans-serif; color:#eef0f4; text-align:left; letter-spacing:normal; }\r\n.rt *,.rt *::before,.rt *::after { box-sizing:border-box; }\r\n.rt { position:fixed; z-index:2147483001; inset:0; display:flex; padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px); background:#181a1f; user-select:text; }\r\n.rt[hidden],.rt [hidden],.rt-launch[hidden] { display:none !important; }\r\n.rt header,.rt main,.rt footer,.rt section,.rt aside,.rt nav { position:static; top:auto; right:auto; bottom:auto; left:auto; float:none; margin:0; }\n.rt button,.rt input,.rt select,.rt textarea { font:inherit; color:inherit; margin:0; touch-action:manipulation; }\r\n.rt button { cursor:pointer; border:1px solid #4f5663; border-radius:4px; background:#292d35; padding:4px 8px; min-height:30px; line-height:1.2; white-space:nowrap; }\r\n.rt button:hover { background:#363d49; }\r\n.rt button:disabled { opacity:.38; cursor:default; }\r\n.rt button:focus-visible,.rt input:focus-visible,.rt select:focus-visible,.rt textarea:focus-visible,.rt-launch:focus-visible { outline:2px solid #a9cafa; outline-offset:-2px; }\r\n.rt button[aria-pressed=true] { color:#b7d3fb; border-color:#799dcd; background:#2a3b53; }\r\n.rt .rt-primary { background:#91b8ee; color:#10223a; border-color:#91b8ee; font-weight:600; }\n.rt .rt-primary:hover { background:#b2cff7; color:#10223a; }\n.rt input:not([type=checkbox]),.rt select,.rt textarea { width:100%; min-width:0; border:1px solid #535c6c; border-radius:4px; background:#15171c; padding:4px 7px; min-height:30px; }\r\n.rt input::placeholder { color:#a9b2c1; opacity:1; }\r\n.rt input[type=checkbox] { width:16px; height:16px; accent-color:#91b8ee; flex-shrink:0; cursor:pointer; }\r\n.rt .rt-panel { display:flex; flex-direction:column; width:100%; height:100%; min-height:0; min-width:0; overflow:hidden; background:#1e2127; }\r\n.rt .rt-header { flex-shrink:0; padding:5px 8px; border-bottom:1px solid #505764; background:#191c22; }\r\n.rt .rt-search-line { display:flex; gap:6px; align-items:center; }\r\n.rt .rt-search { flex:1; min-width:0; }\r\n.rt .rt-close { min-width:32px; width:32px; padding:0; flex-shrink:0; }\r\n.rt .rt-filter-line { display:flex; gap:6px; margin-top:5px; }\r\n.rt .rt-filter-line label { flex:1; min-width:0; }\r\n.rt .rt-filter-line select { padding-right:2px; }\r\n.rt .rt-main { display:flex; flex-direction:column; min-height:0; min-width:0; flex:1; overflow:hidden; }\r\n.rt .rt-bulkbar { display:flex; justify-content:space-between; gap:6px; align-items:center; min-height:30px; padding:0 6px; border-bottom:1px solid #444c59; background:#252932; font-size:11px; flex-shrink:0; }\r\n.rt .rt-page-check { display:flex; align-items:center; gap:6px; min-height:30px; cursor:pointer; }\r\n.rt #rt-bulk-actions { display:flex; gap:3px; }\r\n.rt #rt-bulk-actions button { min-height:26px; padding:3px 6px; font-size:11px; }\r\n.rt .rt-list { flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; touch-action:pan-y; list-style:none; margin:0; padding:0; scrollbar-width:thin; }\r\n.rt .rt-row { display:flex; align-items:center; gap:4px; height:36px; min-height:36px; padding:2px 6px; border-bottom:1px solid #383f4b; }\r\n.rt .rt-row:nth-child(even) { background:#23272f; }\r\n.rt .rt-row.rt-frozen { box-shadow:inset 2px 0 #91b8ee; }\r\n.rt .rt-row-check { display:flex; align-items:center; justify-content:center; width:24px; height:32px; flex-shrink:0; cursor:pointer; }\r\n.rt .rt-select { display:flex; align-items:center; gap:6px; flex:1; min-width:0; text-align:left; border:0; background:transparent; padding:0 3px; height:30px; }\r\n.rt .rt-select:hover { background:transparent; }\r\n.rt .rt-row-id { color:#a8b3c4; font-size:10px; flex-shrink:0; max-width:64px; overflow:hidden; text-overflow:ellipsis; }\r\n.rt .rt-row-title { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }\r\n.rt .rt-row-value { font:12px/1.4 Consolas,monospace; flex-shrink:0; width:72px; padding:2px 4px; border:1px solid #4b5565; border-radius:3px; background:#161b23; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right; }\r\n.rt .rt-row-actions { display:flex; align-items:center; gap:3px; flex-shrink:0; }\r\n.rt .rt-quick { min-width:28px; min-height:28px; height:28px; padding:2px 4px; font-size:12px; }\r\n.rt .rt-pagination { display:flex; align-items:center; justify-content:space-between; gap:8px; height:30px; padding:2px 8px; border-top:1px solid #4c5462; background:#191d24; font-size:11px; flex-shrink:0; }\r\n.rt .rt-pagination > div { display:flex; align-items:center; gap:4px; }\r\n.rt .rt-pagination button { min-height:24px; height:24px; min-width:28px; padding:0 5px; font-size:17px; }\r\n.rt .rt-pagination input { width:42px; min-height:24px; height:24px; padding:1px 2px; text-align:center; font-size:11px; -moz-appearance:textfield; }\r\n.rt .rt-pagination input::-webkit-inner-spin-button { -webkit-appearance:none; }\r\n.rt .rt-footer { display:flex; align-items:center; gap:8px; padding:4px 8px; min-height:38px; background:#16191f; border-top:1px solid #505867; flex-shrink:0; }\r\n.rt .rt-footer button { font-size:12px; }\r\n.rt .rt-status { flex:1; min-width:0; font-size:11px; color:#bdcce1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }\r\n.rt .rt-error { color:#ffbda9; }\r\n.rt .rt-modal { position:absolute; inset:0; z-index:2; display:flex; align-items:center; justify-content:center; padding:12px; background:#080b10c9; }\r\n.rt .rt-modal-dialog { width:480px; max-width:100%; max-height:100%; min-height:0; display:flex; flex-direction:column; border:1px solid #73839d; border-radius:8px; background:#242932; box-shadow:0 16px 48px #0009; overflow:hidden; }\r\n.rt .rt-modal-dialog > header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 12px; border-bottom:1px solid #505c70; background:#1b2029; }\r\n.rt .rt-modal-dialog > header h2 { margin:0; font-size:15px; font-weight:600; }\r\n.rt .rt-modal-content { overflow-y:auto; min-height:0; padding:12px; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; overflow-wrap:anywhere; }\r\n.rt .rt-modal-status { padding:0 12px 8px; font-size:12px; color:#bad4f9; }\r\n.rt .rt-modal-status:empty { display:none; }\r\n.rt .rt-modal-content p { margin:0 0 10px; }\r\n.rt h2 { font-size:18px; margin:0 0 12px; }\r\n.rt h3 { font-size:17px; margin:0 0 8px; }\r\n.rt h4 { margin:12px 0 6px; }\r\n.rt .rt-id { display:block; color:#b1c9eb; font:11px Consolas,monospace; margin-bottom:8px; }\r\n.rt .rt-field { display:block; margin:0 0 12px; }\r\n.rt .rt-field > span { display:block; color:#becada; margin-bottom:4px; font-size:12px; }\r\n.rt .rt-modal-content input:not([type=checkbox]),.rt .rt-modal-content select,.rt .rt-modal-content textarea { font-size:16px; min-height:34px; }\r\n.rt textarea { min-height:64px; resize:vertical; }\r\n.rt .rt-full { width:100%; }\r\n.rt .rt-actions { display:flex; flex-wrap:wrap; gap:6px; }\r\n.rt .rt-divider { height:1px; background:#4b5566; margin:14px 0; }\r\n.rt .rt-muted { color:#b7c2d2; }\r\n.rt .rt-small { font-size:12px; }\r\n.rt .rt-note { background:#222f42; color:#c4d8f5; border:1px solid #576c8b; border-radius:4px; padding:8px; margin:10px 0; font-size:12px; }\r\n.rt .rt-empty { padding:24px 12px; text-align:center; color:#b9c4d4; }\r\n.rt pre { white-space:pre-wrap; overflow-wrap:anywhere; }\r\n.rt .rt-checkbox { display:flex; align-items:center; gap:8px; padding:6px 0; }\r\n.rt .rt-stats { display:flex; flex-wrap:wrap; gap:12px; margin:12px 0; }\r\n.rt .rt-stat strong { display:block; font-size:20px; }\r\n.rt .rt-log-entry { border-bottom:1px solid #505867; padding:10px 0; }\r\n.rt .rt-log-entry strong { display:block; }\r\n.rt code { word-break:break-word; }\r\n.rt .rt-sr { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }\r\n.rt-launch { position:fixed; top:12px; right:12px; z-index:2147483000; background:#26374e; border:1px solid #8daedb; border-radius:5px; padding:6px 10px; cursor:pointer; }\r\n@media(max-width:500px) {\r\n .rt .rt-row { gap:2px; padding:2px 3px; }\r\n .rt .rt-row-check { width:20px; }\r\n .rt .rt-row-id { display:none; }\r\n .rt .rt-row-value { width:48px; }\r\n .rt .rt-row-actions { gap:2px; }\r\n .rt .rt-quick { min-width:24px; padding:2px 3px; font-size:11px; }\r\n .rt .rt-select { font-size:12px; }\r\n .rt .rt-footer { gap:4px; }\r\n .rt .rt-status { font-size:10px; }\r\n .rt .rt-modal { padding:8px; }\r\n}\r\n@media(prefers-reduced-motion:reduce) { .rt * { scroll-behavior:auto !important; transition:none !important; } }\r\n";
+var TOOLKIT_CSS = "/* Compact full-screen editor. No width-dependent sidebar or oversized touch theme. */\n.rt,.rt-launch { box-sizing:border-box; font:13px/1.4 system-ui,'Segoe UI',Arial,sans-serif; color:#eef0f4; text-align:left; letter-spacing:normal; }\n.rt *,.rt *::before,.rt *::after { box-sizing:border-box; }\n.rt { position:fixed; z-index:2147483001; inset:0; display:flex; padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px); background:#181a1f; user-select:text; }\n.rt[hidden],.rt [hidden],.rt-launch[hidden] { display:none !important; }\n.rt header,.rt main,.rt footer,.rt section,.rt aside,.rt nav { position:static; top:auto; right:auto; bottom:auto; left:auto; float:none; margin:0; }\n.rt button,.rt input,.rt select,.rt textarea { font:inherit; color:inherit; margin:0; touch-action:manipulation; }\n.rt button { cursor:pointer; border:1px solid #4f5663; border-radius:4px; background:#292d35; padding:4px 8px; min-height:30px; line-height:1.2; white-space:nowrap; }\n.rt button:hover { background:#363d49; }\n.rt button:disabled { opacity:.38; cursor:default; }\n.rt button:focus-visible,.rt input:focus-visible,.rt select:focus-visible,.rt textarea:focus-visible,.rt-launch:focus-visible { outline:2px solid #a9cafa; outline-offset:-2px; }\n.rt button[aria-pressed=true] { color:#b7d3fb; border-color:#799dcd; background:#2a3b53; }\n.rt .rt-primary { background:#91b8ee; color:#10223a; border-color:#91b8ee; font-weight:600; }\n.rt .rt-primary:hover { background:#b2cff7; color:#10223a; }\n.rt input:not([type=checkbox]),.rt select,.rt textarea { width:100%; min-width:0; border:1px solid #535c6c; border-radius:4px; background:#15171c; padding:4px 7px; min-height:30px; }\n.rt input::placeholder { color:#a9b2c1; opacity:1; }\n.rt input[type=checkbox] { width:16px; height:16px; accent-color:#91b8ee; flex-shrink:0; cursor:pointer; }\n.rt .rt-panel { display:flex; flex-direction:column; width:100%; height:100%; min-height:0; min-width:0; overflow:hidden; background:#1e2127; }\n.rt .rt-header { flex-shrink:0; padding:5px 8px; border-bottom:1px solid #505764; background:#191c22; }\n.rt .rt-search-line { display:flex; gap:6px; align-items:center; }\n.rt .rt-search { flex:1; min-width:0; }\n.rt .rt-close { min-width:32px; width:32px; padding:0; flex-shrink:0; }\n.rt .rt-filter-line { display:flex; gap:6px; margin-top:5px; }\n.rt .rt-filter-line label { flex:1; min-width:0; }\n.rt .rt-filter-line select { padding-right:2px; }\n.rt .rt-main { display:flex; flex-direction:column; min-height:0; min-width:0; flex:1; overflow:hidden; }\n.rt .rt-bulkbar { display:flex; justify-content:space-between; gap:6px; align-items:center; min-height:30px; padding:0 6px; border-bottom:1px solid #444c59; background:#252932; font-size:11px; flex-shrink:0; }\n.rt .rt-page-check { display:flex; align-items:center; gap:6px; min-height:30px; cursor:pointer; }\n.rt #rt-bulk-actions { display:flex; gap:3px; }\n.rt #rt-bulk-actions button { min-height:26px; padding:3px 6px; font-size:11px; }\n.rt .rt-list { flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; touch-action:pan-y; list-style:none; margin:0; padding:0; scrollbar-width:thin; }\n.rt .rt-row { display:flex; align-items:center; gap:4px; height:36px; min-height:36px; padding:2px 6px; border-bottom:1px solid #383f4b; }\n.rt .rt-row:nth-child(even) { background:#23272f; }\n.rt .rt-row.rt-frozen { box-shadow:inset 2px 0 #91b8ee; }\n.rt .rt-row-check { display:flex; align-items:center; justify-content:center; width:24px; height:32px; flex-shrink:0; cursor:pointer; }\n.rt .rt-select { display:flex; align-items:center; gap:6px; flex:1; min-width:0; text-align:left; border:0; background:transparent; padding:0 3px; height:30px; }\n.rt .rt-select:hover { background:transparent; }\n.rt .rt-row-id { color:#a8b3c4; font-size:10px; flex-shrink:0; max-width:64px; overflow:hidden; text-overflow:ellipsis; }\n.rt .rt-row-title { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }\n.rt .rt-row-value { font:12px/1.4 Consolas,monospace; flex-shrink:0; width:72px; padding:2px 4px; border:1px solid #4b5565; border-radius:3px; background:#161b23; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right; }\n.rt .rt-row-actions { display:flex; align-items:center; gap:3px; flex-shrink:0; }\n.rt .rt-quick { min-width:28px; min-height:28px; height:28px; padding:2px 4px; font-size:12px; }\n.rt .rt-pagination { display:flex; align-items:center; justify-content:space-between; gap:8px; height:30px; padding:2px 8px; border-top:1px solid #4c5462; background:#191d24; font-size:11px; flex-shrink:0; }\n.rt .rt-pagination > div { display:flex; align-items:center; gap:4px; }\n.rt .rt-pagination button { min-height:24px; height:24px; min-width:28px; padding:0 5px; font-size:17px; }\n.rt .rt-pagination input { width:42px; min-height:24px; height:24px; padding:1px 2px; text-align:center; font-size:11px; -moz-appearance:textfield; }\n.rt .rt-pagination input::-webkit-inner-spin-button { -webkit-appearance:none; }\n.rt .rt-footer { display:flex; align-items:center; gap:8px; padding:4px 8px; min-height:38px; background:#16191f; border-top:1px solid #505867; flex-shrink:0; }\n.rt .rt-footer button { font-size:12px; }\n.rt .rt-status { flex:1; min-width:0; font-size:11px; color:#bdcce1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }\n.rt .rt-error { color:#ffbda9; }\n.rt .rt-modal { position:absolute; inset:0; z-index:2; display:flex; align-items:center; justify-content:center; padding:12px; background:#080b10c9; }\n.rt .rt-modal-dialog { width:480px; max-width:100%; max-height:100%; min-height:0; display:flex; flex-direction:column; border:1px solid #73839d; border-radius:8px; background:#242932; box-shadow:0 16px 48px #0009; overflow:hidden; }\n.rt .rt-modal-dialog > header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 12px; border-bottom:1px solid #505c70; background:#1b2029; }\n.rt .rt-modal-dialog > header h2 { margin:0; font-size:15px; font-weight:600; }\n.rt .rt-modal-content { overflow-y:auto; min-height:0; padding:12px; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; overflow-wrap:anywhere; }\n.rt .rt-modal-status { padding:0 12px 8px; font-size:12px; color:#bad4f9; }\n.rt .rt-modal-status:empty { display:none; }\n.rt .rt-modal-content p { margin:0 0 10px; }\n.rt h2 { font-size:18px; margin:0 0 12px; }\n.rt h3 { font-size:17px; margin:0 0 8px; }\n.rt h4 { margin:12px 0 6px; }\n.rt .rt-id { display:block; color:#b1c9eb; font:11px Consolas,monospace; margin-bottom:8px; }\n.rt .rt-field { display:block; margin:0 0 12px; }\n.rt .rt-field > span { display:block; color:#becada; margin-bottom:4px; font-size:12px; }\n.rt .rt-modal-content input:not([type=checkbox]),.rt .rt-modal-content select,.rt .rt-modal-content textarea { font-size:16px; min-height:34px; }\n.rt textarea { min-height:64px; resize:vertical; }\n.rt .rt-full { width:100%; }\n.rt .rt-actions { display:flex; flex-wrap:wrap; gap:6px; }\n.rt .rt-divider { height:1px; background:#4b5566; margin:14px 0; }\n.rt .rt-muted { color:#b7c2d2; }\n.rt .rt-small { font-size:12px; }\n.rt .rt-note { background:#222f42; color:#c4d8f5; border:1px solid #576c8b; border-radius:4px; padding:8px; margin:10px 0; font-size:12px; }\n.rt .rt-empty { padding:24px 12px; text-align:center; color:#b9c4d4; }\n.rt pre { white-space:pre-wrap; overflow-wrap:anywhere; }\n.rt .rt-checkbox { display:flex; align-items:center; gap:8px; padding:6px 0; }\n.rt .rt-stats { display:flex; flex-wrap:wrap; gap:12px; margin:12px 0; }\n.rt .rt-stat strong { display:block; font-size:20px; }\n.rt .rt-log-entry { border-bottom:1px solid #505867; padding:10px 0; }\n.rt .rt-log-entry strong { display:block; }\n.rt code { word-break:break-word; }\n.rt .rt-sr { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }\n.rt-launch { position:fixed; top:12px; right:12px; z-index:2147483000; background:#26374e; border:1px solid #8daedb; border-radius:5px; padding:6px 10px; cursor:pointer; }\n@media(max-width:500px) {\n .rt .rt-row { gap:2px; padding:2px 3px; }\n .rt .rt-row-check { width:20px; }\n .rt .rt-row-id { display:none; }\n .rt .rt-row-value { width:48px; }\n .rt .rt-row-actions { gap:2px; }\n .rt .rt-quick { min-width:24px; padding:2px 3px; font-size:11px; }\n .rt .rt-select { font-size:12px; }\n .rt .rt-footer { gap:4px; }\n .rt .rt-status { font-size:10px; }\n .rt .rt-modal { padding:8px; }\n}\n@media(prefers-reduced-motion:reduce) { .rt * { scroll-behavior:auto !important; transition:none !important; } }\n/* Toolbox navigation and reliable constrained scroll areas, including old WebViews. */\n.rt .rt-home { display:none; flex-direction:column; min-height:0; height:100%; }\n.rt.rt-home-open .rt-home { display:flex; }\n.rt.rt-home-open .rt-panel > .rt-header,.rt.rt-home-open .rt-main,.rt.rt-home-open .rt-footer { display:none; }\n.rt .rt-home-header { display:flex; align-items:center; gap:10px; padding:6px 8px; border-bottom:1px solid #505764; flex-shrink:0; }\n.rt .rt-home-header h1 { font-size:16px; margin:0; }\n.rt .rt-home-header > span { margin-left:auto; font-size:11px; }\n.rt .rt-home-content { display:block; flex:1 1 auto; min-height:0; overflow-y:auto; padding:8px; }\n.rt .rt-home-content button { display:block; position:relative; width:100%; padding:9px 34px 9px 10px; text-align:left; margin-bottom:6px; white-space:normal; }\n.rt .rt-home-content strong { display:block; font-size:14px; font-weight:600; }\n.rt .rt-home-content span { display:block; font-size:12px; color:#bdc8d9; margin-top:2px; }\n.rt .rt-home-content b { position:absolute; right:12px; top:14px; font-size:18px; }\n.rt .rt-icon { width:20px; height:20px; flex:none; image-rendering:pixelated; }\n.rt .rt-modal-dialog > header,.rt .rt-modal-status { flex-shrink:0; }\n.rt .rt-modal-dialog > header { justify-content:flex-start; gap:6px; }\n.rt .rt-modal-content { flex:1 1 auto; }\n.rt .rt-list,.rt .rt-modal-content,.rt .rt-home-content { touch-action:none; overscroll-behavior:contain; }\n.rt .rt-list { user-select:none; }\n.rt .rt-coordinate-fields { display:flex; gap:8px; }\n.rt .rt-coordinate-fields > label { flex:1; min-width:0; }\n.rt-launch { right:auto; left:12px; left:max(12px,env(safe-area-inset-left,0px)); top:max(12px,env(safe-area-inset-top,0px)); }\n";
+/* Manual pan survives RPG Maker/JoiPlay cancelling the browser's native gesture. */
+function installToolkitScroll() {
+    var gesture = null, suppressClickUntil = 0, ignoreMouseUntil = 0;
+    function area(node) {
+        while (node && node !== root) {
+            if (node.matches && node.matches('.rt-list,.rt-modal-content,.rt-home-content')) return node;
+            node = node.parentElement;
+        }
+        return null;
+    }
+    function start(event, touch) {
+        if (!opened || (!touch && event.button !== 0)) return;
+        var realMouse = !touch && event.sourceCapabilities && !event.sourceCapabilities.firesTouchEvents;
+        if (touch || realMouse) suppressClickUntil = 0;
+        if (!touch && !realMouse && Date.now() < ignoreMouseUntil) return;
+        if (touch) ignoreMouseUntil = Date.now() + 1000;
+        if (event.touches && event.touches.length !== 1) { gesture = null; return; }
+        var target = area(event.target), point = touch ? event.touches[0] : event;
+        if (!target || target.scrollHeight <= target.clientHeight) return;
+        gesture = { node:target, touch:touch, x:point.clientX, y:point.clientY, top:target.scrollTop, dragged:false };
+    }
+    function move(event, touch) {
+        if (!gesture || gesture.touch !== touch || !opened) return;
+        var point = touch ? event.touches[0] : event;
+        if (!point || (touch && event.touches.length !== 1)) { gesture = null; return; }
+        var dy = point.clientY - gesture.y;
+        if (!gesture.dragged && Math.abs(dy) > 6 && Math.abs(dy) >= Math.abs(point.clientX-gesture.x)) gesture.dragged = true;
+        if (!gesture.dragged) return;
+        gesture.node.scrollTop = gesture.top - dy;
+        if (event.cancelable) event.preventDefault(); event.stopPropagation();
+    }
+    function end(event, touch) {
+        if (!gesture || gesture.touch !== touch) return;
+        if (gesture.dragged) { suppressClickUntil = Date.now()+450; if (event.cancelable) event.preventDefault(); event.stopPropagation(); }
+        gesture = null;
+    }
+    root.addEventListener('touchstart',function(e){start(e,true);},{capture:true,passive:true});
+    root.addEventListener('mousedown',function(e){start(e,false);},true);
+    g.addEventListener('touchmove',function(e){move(e,true);},{capture:true,passive:false});
+    g.addEventListener('mousemove',function(e){move(e,false);},true);
+    g.addEventListener('touchend',function(e){end(e,true);},{capture:true,passive:false});
+    g.addEventListener('mouseup',function(e){end(e,false);},true);
+    g.addEventListener('touchcancel',function(){gesture=null;},true);
+    g.addEventListener('blur',function(){gesture=null;});
+    root.addEventListener('click',function(e){if(Date.now()<suppressClickUntil){e.preventDefault();e.stopImmediatePropagation();}},true);
+    root.addEventListener('wheel',function(e){
+        var target = area(e.target); if (!target || !opened) return;
+        target.scrollTop += e.deltaY * (e.deltaMode === 1 ? 20 : e.deltaMode === 2 ? target.clientHeight : 1);
+        if(e.cancelable)e.preventDefault();e.stopPropagation();
+    },{capture:true,passive:false});
+}
+
 /* DOM overlay; no engine assets, dependencies or timers while closed. */
 var toolkitParams = g.PluginManager && g.PluginManager.parameters('RPGMToolkit') || {};
 var hotkey = /^(F6|F7|F10)$/.test(toolkitParams.Hotkey || '') ? toolkitParams.Hotkey : 'F6';
 var pageSize = Math.max(20, Math.min(80, Number(toolkitParams.PageSize) || 60));
-var runtime, translator, root, launch, previousFocus, openScene, openVariables, searchTimer;
+var gameTools, runtime, translator, root, launch, previousFocus, openScene, openVariables, searchTimer;
 var opened = false, dirty = false, tab = 'variables', query = '', filter = 'all', page = 0, selected = null, found = [];
 var chosenActor = '', checked = {}, modalMode = '', modalFocus = null, exactValue = '';
 function picked() { return Object.keys(checked).map(function(k) { return checked[k]; }); }
@@ -488,13 +689,15 @@ function allowed() {
 function mobileLayout() { return g.matchMedia && g.matchMedia('(max-width: 800px), (max-width: 950px) and (max-height: 500px)').matches; }
 function touchInput() { return g.matchMedia && g.matchMedia('(pointer: coarse)').matches; }
 function syncViewport() {
-    if (!opened || !root || !g.visualViewport) return;
-    var v = g.visualViewport;
+    if (!opened || !root) return;
+    var v = g.visualViewport || { height:g.innerHeight, width:g.innerWidth, offsetTop:0, offsetLeft:0 };
     root.style.height = v.height + 'px'; root.style.width = v.width + 'px';
     root.style.top = v.offsetTop + 'px'; root.style.left = v.offsetLeft + 'px';
     root.style.bottom = 'auto'; root.style.right = 'auto';
+    fitToolboxModal();
 }
 if (g.visualViewport) { g.visualViewport.addEventListener('resize', syncViewport); g.visualViewport.addEventListener('scroll', syncViewport); }
+g.addEventListener('resize', syncViewport);
 function buildRoot() {
     if (root) return;
     var style = document.createElement('style'); style.id = 'rpgm-toolkit-style'; style.textContent = TOOLKIT_CSS; document.head.appendChild(style);
@@ -507,6 +710,8 @@ function buildRoot() {
     $('[data-action="prev"]').setAttribute('aria-label', 'Page précédente');
     $('[data-action="next"]').setAttribute('aria-label', 'Page suivante');
     document.body.appendChild(root);
+    installToolboxUI();
+    installToolkitScroll();
     ['keydown', 'keyup', 'keypress', 'mousedown', 'mouseup', 'mousemove', 'click', 'dblclick', 'contextmenu', 'touchstart', 'touchmove', 'touchend', 'wheel', 'pointerdown', 'pointerup'].forEach(function(type) {
         root.addEventListener(type, function(event) { event.stopPropagation(); }, { passive: type.indexOf('touch') === 0 || type === 'wheel' });
     });
@@ -533,7 +738,7 @@ function buildRoot() {
             if (event.target.id === 'rt-filter') { filter = event.target.value; $('#rt-exact-wrap').hidden = filter !== 'value'; page = 0; renderList(); }
             if (event.target.id === 'rt-category') {
                 var category = event.target.value;
-                if (/^(party|translations|history)$/.test(category)) { $('#rt-category').value = tab; openModal(category, labels[category]); if (category === 'party') renderParty(); else if (category === 'history') renderHistory(); else { pendingTranslations = picked(); renderTranslations(); } }
+                if (/^(party|translations|history)$/.test(category)) { $('#rt-category').value = tab; openModal(category, labels[category]); if (category === 'party') renderParty(); else if (category === 'history') renderHistory(); else { translationScope = 'selection'; pendingTranslations = picked(); renderTranslations(); } }
                 else { tab = category; checked = {}; selected = null; page = 0; render(); }
             }
             if (event.target.id === 'rt-page-number') { page = runtime.integer(event.target.value,1,Math.max(1,Math.ceil(found.length/pageSize))) - 1; renderList(); $('.rt-list').scrollTop = 0; }
@@ -545,6 +750,7 @@ function buildRoot() {
             if (event.target.hasAttribute('data-check-index')) { var record = found[Number(event.target.getAttribute('data-check-index'))]; if (event.target.checked) { if (picked().length >= 500) { event.target.checked = false; throw new Error('Maximum : 500 entrées sélectionnées.'); } checked[record.key] = record; } else delete checked[record.key]; updateSelection(); }
             if (event.target.id === 'rt-value-type') updateValueInput();
             if (event.target.id === 'rt-english') { runtime.prefs.english = event.target.checked; runtime.savePrefs(); renderList(); renderDetail(); }
+            if (event.target.id === 'rt-translation-scope') { translationScope = event.target.value; renderTranslations(); $('#rt-translation-scope').focus(); }
             if (event.target.id === 'rt-source') { runtime.prefs.source = event.target.value; runtime.savePrefs(); }
             if (event.target.id === 'rt-import') importFile(event.target.files[0]);
             if (event.target.id === 'rt-actor-target') { chosenActor = event.target.value; renderActorContext(); }
@@ -561,14 +767,14 @@ function render() {
 }
 function openModal(mode, title) {
     if (!modalMode) modalFocus = document.activeElement;
-    modalMode = mode; $('.rt-modal').hidden = false; $('.rt-modal-content').innerHTML = ''; $('.rt-modal-status').textContent = '';
+    modalMode = mode; $('.rt-modal-content').scrollTop = 0; $('.rt-modal').hidden = false; $('.rt-modal-content').innerHTML = ''; $('.rt-modal-status').textContent = '';
     $('#rt-modal-title').textContent = title; $('.rt-panel').setAttribute('aria-hidden','true'); $('.rt-panel').inert = true;
-    $('.rt-modal-dialog').focus();
+    $('.rt-modal-dialog').focus(); fitToolboxModal();
 }
 function closeModal() {
     if (!modalMode) return;
-    modalMode = ''; $('.rt-modal').hidden = true; $('.rt-panel').removeAttribute('aria-hidden'); $('.rt-panel').inert = false;
-    if (opened) renderList();
+    toolboxMapToken++; modalMode = ''; $('.rt-modal').hidden = true; $('.rt-panel').removeAttribute('aria-hidden'); $('.rt-panel').inert = false;
+    if (opened) { if (toolboxHome) showToolboxHome(); else renderList(); }
     if (modalFocus && document.contains(modalFocus)) modalFocus.focus(); else $('.rt-panel').focus();
 }
 function updateSelection() {
@@ -602,13 +808,13 @@ function renderList() {
         var index = start+i, v = runtime.value(r), edit = runtime.editable(r), frozen = runtime.isFrozen(r), name = runtime.title(r), quick = '';
         if (edit && typeof v === 'number') quick = rowAction('−99','minus99',index,'Retirer 99 : '+name) + rowAction('+99','plus99',index,'Ajouter 99 : '+name);
         else if (edit && typeof v === 'boolean') quick = rowAction(v ? 'false' : 'true','toggle-bool',index,'Basculer : '+name);
-        return '<li class="rt-row' + (frozen ? ' rt-frozen' : '') + '"><label class="rt-row-check"><input type="checkbox" data-check-index="' + index + '" aria-label="Sélectionner : ' + esc(name) + '"' + (checked[r.key] ? ' checked' : '') + '></label><button type="button" class="rt-select" data-action="select" data-index="' + index + '" title="' + esc(name+' · #'+r.id) + '"><span class="rt-row-id">#' + esc(r.id) + '</span><span class="rt-row-title">' + esc(name) + '</span></button><span class="rt-row-value" title="' + esc(String(v)) + '">' + esc(typeof v === 'boolean' ? String(v) : rowValue(r)) + '</span><div class="rt-row-actions">' + quick + rowAction(runtime.prefs.favorites[r.key] ? '★' : '☆','star',index,'Favori : '+name,!!runtime.prefs.favorites[r.key]) + rowAction(lockIcon(frozen),'freeze',index,(frozen?'Libérer : ':'Figer : ')+name,frozen,!edit) + rowAction('✎','select',index,'Éditer : '+name) + '</div></li>';
+        return '<li class="rt-row' + (frozen ? ' rt-frozen' : '') + '"><label class="rt-row-check"><input type="checkbox" data-check-index="' + index + '" aria-label="Sélectionner : ' + esc(name) + '"' + (checked[r.key] ? ' checked' : '') + '></label><button type="button" class="rt-select" data-action="select" data-index="' + index + '" title="' + esc(name+' · #'+r.id) + '">' + (r.data && typeof r.data.iconIndex === 'number' ? '<canvas class="rt-icon" width="32" height="32" data-icon="' + r.data.iconIndex + '" aria-hidden="true"></canvas>' : '') + '<span class="rt-row-id">#' + esc(r.id) + '</span><span class="rt-row-title">' + esc(name) + '</span></button><span class="rt-row-value" title="' + esc(String(v)) + '">' + esc(typeof v === 'boolean' ? String(v) : rowValue(r)) + '</span><div class="rt-row-actions">' + quick + rowAction(runtime.prefs.favorites[r.key] ? '★' : '☆','star',index,'Favori : '+name,!!runtime.prefs.favorites[r.key]) + rowAction(lockIcon(frozen),'freeze',index,(frozen?'Libérer : ':'Figer : ')+name,frozen,!edit) + rowAction('✎','select',index,'Éditer : '+name) + '</div></li>';
     }).join('') : '<li class="rt-empty">Aucun résultat. Changez la recherche ou le filtre.</li>';
     $('#rt-count').textContent = found.length ? (start+1)+'–'+(start+rows.length)+' / '+found.length.toLocaleString() : '0 résultat';
     $('#rt-page-number').value = page+1; $('#rt-page-number').max = Math.max(1,Math.ceil(found.length/pageSize));
     $('#rt-page-total').textContent = '/ '+Math.max(1,Math.ceil(found.length/pageSize));
     $('[data-action="prev"]').disabled = page===0; $('[data-action="next"]').disabled = start+pageSize>=found.length;
-    updateSelection();
+    updateSelection(); paintIcons();
 }
 function paintIcons() {
     if (!g.ImageManager || !g.ImageManager.loadSystem) return;
@@ -687,10 +893,20 @@ function sourceSelector() {
     var languages = { ja: 'Japonais', fr: 'Français', 'zh-CN': 'Chinois simplifié', 'zh-TW': 'Chinois traditionnel', ko: 'Coréen', ru: 'Russe', es: 'Espagnol', de: 'Allemand', it: 'Italien', pt: 'Portugais', en: 'Anglais' };
     return '<label class="rt-field"><span>Langue des noms d’origine</span><select id="rt-source">' + Object.keys(languages).map(function(code) { return '<option value="' + code + '"' + (runtime.prefs.source === code ? ' selected' : '') + '>' + languages[code] + '</option>'; }).join('') + '</select></label>';
 }
-var pendingTranslations = [];
+var pendingTranslations = [], translationScope = 'selection', translationRun = 0, translationProgress = '';
+function translationRecords() {
+    var records = pendingTranslations;
+    if (translationScope === 'category') records = runtime.list(tab);
+    if (translationScope === 'all') { records = []; runtime.kinds.forEach(function(kind) { records = records.concat(runtime.list(kind)); }); }
+    return records.filter(function(r) { return r.original.trim() && !runtime.alias(r); });
+}
 function renderTranslations() {
-    $('.rt-modal-content').innerHTML = '<div class="rt-page"><h2>Traductions anglaises</h2><label class="rt-checkbox"><input id="rt-english" type="checkbox"' + (runtime.prefs.english ? ' checked' : '') + '>Afficher les noms anglais</label><p class="rt-muted">Un nom plus clair, avec les données d’origine intactes.</p><section><div class="rt-note">Les traductions changent uniquement les noms affichés dans le Toolkit. Elles ne modifient ni les identifiants, ni les valeurs, ni les textes du jeu.</div><h3>Traduction à la demande</h3>' + sourceSelector() + '<p class="rt-small rt-muted">Le bouton ci-dessous envoie les noms sélectionnés à MyMemory (service tiers) pour les traduire en anglais. Les valeurs des variables ne sont pas envoyées. Le service gratuit sans clé est soumis à un quota ; réseau et autorisation CORS nécessaires.</p><p id="rt-translation-count">' + pendingTranslations.length + ' nom(s) sélectionné(s), déjà traduits exclus automatiquement.</p><div class="rt-actions">' + button('Envoyer les noms à MyMemory', 'translate-start', 'rt-primary') + button('Arrêter', 'translate-stop') + '</div><p id="rt-translation-progress" class="rt-small" role="status" style="margin-top:12px"></p><div class="rt-divider"></div><h3>Dictionnaire local</h3><p class="rt-muted">' + Object.keys(runtime.prefs.aliases).length + ' alias enregistré(s) pour ce jeu. Saisissez un nom anglais dans les détails d’une entrée ou importez un dictionnaire JSON.</p><div class="rt-actions">' + button('Exporter les traductions', 'export-aliases') + button('Exporter les noms à traduire', 'export-names') + '</div><label class="rt-field" style="margin-top:16px"><span>Importer un dictionnaire JSON (5 Mo maximum)</span><input id="rt-import" type="file" accept=".json,application/json"></label><p class="rt-small rt-muted">L’import ne retient que les entrées dont la catégorie, l’ID et le nom d’origine correspondent. Les fichiers ne sont pas envoyés à un serveur.</p></section></div>';
-    $('[data-action="translate-start"]').disabled = !pendingTranslations.length || translator.busy();
+    var remaining = translationRecords().length;
+    var scope = '<label class="rt-field"><span>Noms à traduire</span><select id="rt-translation-scope"><option value="selection">Sélection / page</option><option value="category">Toute la catégorie · ' + esc(labels[tab]) + '</option><option value="all">Tout le jeu</option></select></label>';
+    $('.rt-modal-content').innerHTML = '<div class="rt-page"><h2>Traductions anglaises</h2><label class="rt-checkbox"><input id="rt-english" type="checkbox"' + (runtime.prefs.english ? ' checked' : '') + '>Afficher les noms anglais</label><p class="rt-muted">Un nom plus clair, avec les données d’origine intactes.</p><section><div class="rt-note">Les traductions changent uniquement les noms affichés dans le Toolkit. Elles ne modifient ni les identifiants, ni les valeurs, ni les textes du jeu.</div><h3>Traduction à la demande</h3>' + scope + sourceSelector() + '<p class="rt-small rt-muted">Les noms choisis sont envoyés à MyMemory : trois requêtes simultanées, noms identiques regroupés. Chaque résultat est enregistré localement. Les valeurs des variables ne sont pas envoyées. Le service gratuit sans clé est soumis à un quota ; réseau et autorisation CORS nécessaires.</p><p id="rt-translation-count">' + remaining + ' nom(s) restant(s). Les noms déjà traduits sont exclus. Les interrupteurs locaux concernent la carte actuelle.</p><div class="rt-actions">' + button(translationScope === 'all' ? 'Tout traduire' : 'Traduire les noms', 'translate-start', 'rt-primary') + button('Arrêter', 'translate-stop') + '</div><p id="rt-translation-progress" class="rt-small" role="status" style="margin-top:12px">' + esc(translationProgress) + '</p><div class="rt-divider"></div><h3>Dictionnaire local</h3><p class="rt-muted">' + Object.keys(runtime.prefs.aliases).length + ' alias enregistré(s) pour ce jeu. Saisissez un nom anglais dans les détails d’une entrée ou importez un dictionnaire JSON.</p><div class="rt-actions">' + button('Exporter les traductions', 'export-aliases') + button('Exporter les noms à traduire', 'export-names') + '</div><label class="rt-field" style="margin-top:16px"><span>Importer un dictionnaire JSON (5 Mo maximum)</span><input id="rt-import" type="file" accept=".json,application/json"></label><p class="rt-small rt-muted">L’import ne retient que les entrées dont la catégorie, l’ID et le nom d’origine correspondent. Les fichiers ne sont pas envoyés à un serveur.</p></section></div>';
+    $('#rt-translation-scope').value = translationScope;
+    $('#rt-translation-scope').disabled = translator.busy(); $('#rt-source').disabled = translator.busy();
+    $('[data-action="translate-start"]').disabled = !remaining || translator.busy();
     $('[data-action="translate-stop"]').disabled = !translator.busy();
 }
 function renderHistory() {
@@ -702,19 +918,29 @@ function changed(message, actorChange) {
     say(message + (actorChange ? ' · Pile d’annulation réinitialisée.' : ''));
 }
 function translateChoice(records) {
+    translationScope = 'selection'; translationProgress = '';
     pendingTranslations = records.filter(function(r) { return r.original.trim() && !runtime.alias(r); });
     openModal('translations', 'Traduction'); renderTranslations();
 }
 function startTranslation() {
-    if (!pendingTranslations.length) { say('Sélectionnez une entrée ou une page à traduire.'); return; }
-    var batch = pendingTranslations.slice();
+    var batch = translationRecords();
+    if (!batch.length) { say('Aucun nom restant à traduire.'); return; }
+    var run = ++translationRun;
+    translationProgress = '0 / ' + batch.length + ' noms traduits';
     translator.translate(batch, runtime.prefs.source, function(done, total) {
-        if ($('#rt-translation-progress')) $('#rt-translation-progress').textContent = done + ' / ' + total + ' noms traduits';
-        say(done + ' / ' + total + ' noms traduits');
+        if (run !== translationRun) return;
+        translationProgress = done + ' / ' + total + ' noms traduits';
+        if (opened && modalMode === 'translations') {
+            $('#rt-translation-progress').textContent = translationProgress;
+            say(translationProgress + (runtime.storageWarning() ? ' · Stockage indisponible : exportez le dictionnaire.' : ' · Enregistrés localement'));
+        }
     }).then(function(count) {
-        pendingTranslations = []; if (opened && modalMode === 'translations') renderTranslations();
-        if (opened) say(count + ' nom(s) traduit(s).' + (runtime.storageWarning() ? ' Stockage local indisponible : exportez le dictionnaire.' : ''));
-    }).catch(function(e) { if (opened) { if (modalMode === 'translations') renderTranslations(); say(e.message, true); } });
+        if (run !== translationRun) return;
+        if (opened && modalMode === 'translations') { renderTranslations(); say(count + ' nom(s) traduit(s).' + (runtime.storageWarning() ? ' Stockage indisponible : exportez le dictionnaire.' : ' Enregistrés localement.')); }
+    }).catch(function(e) {
+        if (run !== translationRun) return;
+        if (opened && modalMode === 'translations') { renderTranslations(); say(e.message + ' Les résultats reçus sont conservés. Relancez pour reprendre les noms manquants.', true); }
+    });
     renderTranslations();
 }
 function download(name, data) {
@@ -736,6 +962,7 @@ function importFile(file) {
     reader.readAsText(file);
 }
 function act(action, node) {
+    if (toolboxAction(action, node)) return;
     var r, id;
     if (action === 'modal-close' || action === 'back-results') { closeModal(); return; }
     if (action === 'select') { selected = found[Number(node.getAttribute('data-index'))]; openModal('edit', 'Éditer · #' + selected.id); $('.rt-modal-content').innerHTML = '<div class="rt-detail"></div>'; renderDetail(); return; }
@@ -761,7 +988,7 @@ function act(action, node) {
     if (action === 'translate-page') { translateChoice(found.slice(page * pageSize, (page + 1) * pageSize)); return; }
     if (action === 'translate-one') { translateChoice([selected]); return; }
     if (action === 'translate-start') { startTranslation(); return; }
-    if (action === 'translate-stop') { translator.cancel(); renderTranslations(); say('Traduction arrêtée. Les noms déjà traduits sont conservés.'); return; }
+    if (action === 'translate-stop') { translationRun++; translator.cancel(); renderTranslations(); say('Traduction arrêtée. Les noms déjà traduits sont conservés.'); return; }
     if (action === 'export-aliases') { download('RPGMToolkit-translations-' + runtime.project + '.json', runtime.exportAliases()); say('Dictionnaire exporté.'); return; }
     if (action === 'export-names') {
         var entries = []; runtime.kinds.forEach(function(k) { runtime.list(k).forEach(function(x) { if (x.original) entries.push({ key: x.key, original: x.original, english: runtime.alias(x) }); }); });
@@ -784,6 +1011,7 @@ function act(action, node) {
     }
 }
 function submit(form) {
+    if (toolboxSubmit(form)) return;
     if (form === 'bulk') { var count = runtime.setMany(picked(),readValueInput()); changed(count + ' entrées modifiées.'); closeModal(); return; }
     if (form === 'variable') {
         var next = readValueInput();
@@ -799,12 +1027,13 @@ function openToolkit() {
     if (!allowed()) return false;
     try {
         if (!runtime) { var storage; try { storage = g.localStorage; } catch (e) { storage = { getItem: function() { return null; }, setItem: function() { throw new Error('Stockage indisponible'); } }; } runtime = createToolkitRuntime(g, storage); translator = createToolkitTranslator(runtime, g); }
+        if (!gameTools) gameTools = createToolkitTools(g);
         runtime.refresh(); selected = null; checked = {}; 
         buildRoot(); previousFocus = document.activeElement; openScene = g.SceneManager._scene;
         openVariables = g.$gameVariables; opened = true; root.hidden = false; if (launch) launch.hidden = true;
-        clearInput(); render();
+        clearInput(); render(); showToolboxHome();
         say(runtime.storageWarning() ? 'Stockage local indisponible : exportez vos traductions pour les conserver.' : 'Prêt · Les modifications s’appliquent à la partie en cours.');
-        syncViewport(); var focus = touchInput() ? $('.rt-panel') : ($('#rt-search') || $('.rt-panel')); focus.focus(); return true;
+        syncViewport(); $('.rt-panel').focus(); return true;
     } catch (e) { opened = false; if (root) root.hidden = true; clearInput(); if (g.console) g.console.error('RPGMToolkit: ' + e.message); return false; }
 }
 function refreshSceneWindows() {
@@ -816,12 +1045,12 @@ function refreshSceneWindows() {
 }
 function closeToolkit() {
     if (!opened) return;
-    closeModal(); opened = false; clearTimeout(searchTimer); if (translator) translator.cancel(); root.hidden = true;
+    opened = false; closeModal(); translationRun++; clearTimeout(searchTimer); if (translator) translator.cancel(); root.hidden = true;
     clearInput(); refreshSceneWindows();
     if (previousFocus && document.contains(previousFocus)) previousFocus.focus();
 }
 function toggleToolkit() { return opened ? closeToolkit() : openToolkit(); }
-g.RPGMToolkit = { version: '1.2.0', open: openToolkit, close: closeToolkit, toggle: toggleToolkit, isOpen: function() { return opened; } };
+g.RPGMToolkit = { version: '1.3.0', open: openToolkit, close: closeToolkit, toggle: toggleToolkit, isOpen: function() { return opened; } };
 var heldCloseKey = null;
 g.addEventListener('keydown', function(event) {
     var key = event.key || ({ 117: 'F6', 118: 'F7', 121: 'F10', 27: 'Escape' }[event.keyCode]);
@@ -847,7 +1076,7 @@ g.addEventListener('keyup', function(event) {
 g.addEventListener('focus', function() { if (opened) clearInput(); });
 function mountLauncher() {
     if (toolkitParams.ShowButton === 'false' || launch) return;
-    buildRoot(); launch = document.createElement('button'); launch.className = 'rt-launch'; launch.type = 'button'; launch.textContent = '◇ Toolkit · ' + hotkey; launch.hidden = true;
+    buildRoot(); launch = document.createElement('button'); launch.className = 'rt-launch'; launch.type = 'button'; launch.textContent = 'Toolbox · ' + hotkey; launch.hidden = true;
     launch.setAttribute('aria-label', 'Ouvrir RPGM Toolkit (' + hotkey + ')');
     ['mousedown', 'mouseup', 'touchstart', 'touchend', 'pointerdown', 'pointerup'].forEach(function(type) { launch.addEventListener(type, function(event) { event.stopPropagation(); }, { passive: true }); });
     launch.addEventListener('click', function(event) { event.stopPropagation(); openToolkit(); });
@@ -858,8 +1087,9 @@ var originalUpdateScene = g.SceneManager.updateScene;
 g.SceneManager.updateScene = function() {
     if (opened && (this._scene !== openScene || g.$gameVariables !== openVariables || this.isSceneChanging())) closeToolkit();
     if (launch) { var hidden = opened || !allowed(); if (launch.hidden !== hidden) launch.hidden = hidden; }
+    if (gameTools) gameTools.tick();
     if (runtime) runtime.enforceFrozen();
-    if (!opened) { var result = originalUpdateScene.apply(this, arguments); if (runtime) runtime.enforceFrozen(); return result; }
+    if (!opened) { var result = originalUpdateScene.apply(this, arguments); if (gameTools) gameTools.tick(); if (runtime) runtime.enforceFrozen(); return result; }
 };
 function openFromInterpreter() { if (openToolkit() && this && this.setWaitMode) this.setWaitMode('rpgmToolkit'); }
 if (g.PluginManager.registerCommand) { g.PluginManager.registerCommand('RPGMToolkit', 'Open', openFromInterpreter); g.PluginManager.registerCommand('RPGMToolkit', 'Close', closeToolkit); }
@@ -874,6 +1104,124 @@ if (g.Game_Interpreter) {
         if (previousPluginCommand) previousPluginCommand.apply(this, arguments);
         if (String(command).toLowerCase() === 'rpgmtoolkit') { if (String((args || [])[0]).toLowerCase() === 'close') closeToolkit(); else openFromInterpreter.call(this); }
     };
+}
+
+/* Global navigation and separate tool pages. Engine logic lives in tools.js. */
+var toolboxHome = true, toolboxMapToken = 0, toolboxMap = null;
+function fitToolboxModal() {
+    if (!root || !opened || !modalMode) return;
+    var modal = $('.rt-modal'), dialog = $('.rt-modal-dialog'), content = $('.rt-modal-content');
+    var css = g.getComputedStyle(modal), available = root.clientHeight - parseFloat(css.paddingTop || 0) - parseFloat(css.paddingBottom || 0) - 4;
+    dialog.style.maxHeight = Math.max(60, available) + 'px';
+    content.style.maxHeight = Math.max(20, available - dialog.querySelector('header').offsetHeight - $('.rt-modal-status').offsetHeight - 2) + 'px';
+}
+function installToolboxUI() {
+    var home = document.createElement('section'); home.className = 'rt-home';
+    home.innerHTML = '<header class="rt-home-header">' + button('✕','tool-close','rt-close') + '<h1>Toolbox</h1><span class="rt-muted">Jeu en pause</span></header><nav class="rt-home-content" aria-label="Modes Toolbox"></nav>';
+    $('.rt-panel').insertBefore(home, $('.rt-header'));
+    home.querySelector('[data-action="tool-close"]').setAttribute('aria-label','Fermer le Toolkit');
+    var line = $('.rt-search-line'); line.insertBefore($('[data-action="close"]'),line.firstChild);
+    var back = document.createElement('button'); back.type = 'button'; back.textContent = '‹'; back.dataset.action = 'tool-home'; back.setAttribute('aria-label','Retour à Toolbox');
+    line.insertBefore(back, $('.rt-search'));
+    var header = $('.rt-modal-dialog > header'), modalBack = $('[data-action="modal-close"]');
+    modalBack.textContent = '‹'; modalBack.setAttribute('aria-label','Retour au menu précédent');
+    header.insertBefore(modalBack,header.firstChild);
+    var close = document.createElement('button'); close.type = 'button'; close.textContent = '✕'; close.className = 'rt-close'; close.dataset.action = 'tool-close'; close.setAttribute('aria-label','Fermer le Toolkit'); header.insertBefore(close,header.firstChild);
+    root.addEventListener('change', function(event) {
+        guarded(function() {
+            if (event.target.id === 'rt-tool-actor' || event.target.id === 'rt-tool-param') updateToolValues();
+            if (event.target.id === 'rt-tool-map') loadToolMap();
+        });
+    });
+    root.addEventListener('input', function(event) {
+        if (event.target.id === 'rt-map-query') { renderToolMaps(event.target.value); loadToolMap(); }
+    });
+    if (g.MutationObserver) new g.MutationObserver(fitToolboxModal).observe($('.rt-modal'),{childList:true,subtree:true,characterData:true});
+}
+function showToolboxHome() {
+    closeModal(); toolboxHome = true; root.classList.add('rt-home-open');
+    var state = gameTools.state();
+    var entries = [
+        ['editors','Éditeurs','Variables, objets, armes, armures…'],
+        ['translations','Traductions','Noms anglais · tout traduire et reprendre'],
+        ['god','Godmode',state.god ? 'Activé · équipe protégée' : 'HP au maximum · protection contre K.O.'],
+        ['noclip','No Clip',state.noclip ? 'Activé · obstacles traversables' : 'Traverser les obstacles de la carte'],
+        ['resources','HP / MP','PV, PM et TP · acteur ou équipe'],
+        ['stats','Stats','Niveau, expérience et bonus permanents'],
+        ['teleport','Téléportation','Choisir une carte et une position'],
+        ['party','Partie','Argent et sauvegarde'],
+        ['history','Historique','Annuler ou rétablir une modification']
+    ];
+    $('.rt-home-content').innerHTML = entries.map(function(e) { return '<button type="button" data-action="tool-'+e[0]+'"><strong>'+e[1]+'</strong><span>'+e[2]+'</span><b aria-hidden="true">›</b></button>'; }).join('');
+    $('.rt-panel').focus();
+}
+function toolActorSelector(all) {
+    return '<label class="rt-field"><span>Acteur</span><select id="rt-tool-actor">' + (all ? '<option value="all">Toute l’équipe</option>' : '') + gameTools.members().map(function(a) { return '<option value="'+a.actorId()+'">'+esc(a.name())+'</option>'; }).join('') + '</select></label>';
+}
+function toolPage(mode) {
+    var titles = {god:'Godmode',noclip:'No Clip',resources:'HP / MP',stats:'Stats',teleport:'Téléportation'};
+    openModal(mode,titles[mode]); var html = '';
+    if (mode === 'god' || mode === 'noclip') {
+        var active = gameTools.state()[mode];
+        html = '<p>' + (mode === 'god' ? 'Maintient les HP de l’équipe au maximum et bloque l’état K.O. Les ennemis restent inchangés.' : 'Traverse les obstacles de la carte. Les bords de carte et les règles spéciales des autres plugins restent applicables.') + '</p><p class="rt-note">Mode de session : reste actif après fermeture du panneau, puis se désactive au chargement d’une partie.</p><button type="button" class="rt-primary" data-action="tool-toggle-'+mode+'" aria-pressed="'+active+'">'+(active ? 'Désactiver' : 'Activer')+'</button>';
+    }
+    if (mode === 'resources') html = '<form data-form="tool-resources">'+toolActorSelector(true)+'<p id="rt-tool-summary" class="rt-muted"></p>'+field('HP · points de vie','rt-tool-hp',0,'number','min="0" step="1" required')+field('MP · points de magie','rt-tool-mp',0,'number','min="0" step="1" required')+field('TP','rt-tool-tp',0,'number','min="0" step="1" required')+'<div class="rt-actions"><button type="submit" class="rt-primary">Appliquer</button>'+button('Tout restaurer','tool-heal')+'</div></form>';
+    if (mode === 'stats') html = '<form data-form="tool-stats">'+toolActorSelector(false)+'<label class="rt-field"><span>Statistique</span><select id="rt-tool-param"><option value="level">Niveau</option><option value="exp">Expérience totale</option>'+['HP max','MP max','Attaque','Défense','Attaque magique','Défense magique','Agilité','Chance'].map(function(n,i){return '<option value="'+i+'">Bonus · '+n+'</option>';}).join('')+'</select></label><p id="rt-tool-summary" class="rt-muted"></p>'+field('Nouvelle valeur','rt-tool-value',0,'number','step="1" required')+'<button type="submit" class="rt-primary">Appliquer</button><p class="rt-note">Les bonus s’ajoutent aux statistiques de base et d’équipement. Les changements sont conservés avec la sauvegarde du jeu.</p></form>';
+    if (mode === 'teleport') html = '<form data-form="tool-teleport">'+field('Rechercher une carte · nom ou ID','rt-map-query','','search','autocomplete="off"')+'<label class="rt-field"><span>Carte</span><select id="rt-tool-map"></select></label><p id="rt-map-summary" role="status"></p><div class="rt-coordinate-fields">'+field('X','rt-map-x',0,'number','min="0" step="1" required')+field('Y','rt-map-y',0,'number','min="0" step="1" required')+'</div><label class="rt-field"><span>Direction</span><select id="rt-map-direction"><option value="0">Conserver</option><option value="2">Bas</option><option value="4">Gauche</option><option value="6">Droite</option><option value="8">Haut</option></select></label><button id="rt-map-go" type="submit" class="rt-primary" disabled>Se téléporter</button><p class="rt-note">Coordonnées en cases, à partir de 0. Choisissez une case praticable. Le panneau se ferme pour effectuer le transfert.</p></form>';
+    $('.rt-modal-content').innerHTML = html;
+    if (mode === 'resources' || mode === 'stats') updateToolValues();
+    if (mode === 'teleport') { renderToolMaps(''); $('#rt-tool-map').value = String(g.$gameMap.mapId()); if (!$('#rt-tool-map').value) $('#rt-tool-map').selectedIndex = 0; loadToolMap(); }
+}
+function updateToolValues() {
+    var id = $('#rt-tool-actor').value, actors = gameTools.members().filter(function(a){return id === 'all' || String(a.actorId()) === id;}), a = actors[0];
+    if (!a) { $('#rt-tool-summary').textContent = 'Aucun acteur dans l’équipe.'; return; }
+    if (modalMode === 'resources') {
+        var maxHp = Math.min.apply(null,actors.map(function(a){return a.mhp;})), maxMp = Math.min.apply(null,actors.map(function(a){return a.mmp;})), maxTp = Math.min.apply(null,actors.map(function(a){return a.maxTp();}));
+        $('#rt-tool-hp').max = maxHp; $('#rt-tool-mp').max = maxMp; $('#rt-tool-tp').max = maxTp;
+        $('#rt-tool-hp').value = Math.min(a.hp,maxHp); $('#rt-tool-mp').value = Math.min(a.mp,maxMp); $('#rt-tool-tp').value = Math.min(a.tp,maxTp);
+        $('#rt-tool-summary').textContent = id === 'all' ? 'Valeurs communes à toute l’équipe. « Tout restaurer » utilise les maxima propres à chaque acteur.' : a.name()+' · HP '+a.hp+'/'+a.mhp+' · MP '+a.mp+'/'+a.mmp;
+    } else {
+        var param = $('#rt-tool-param').value;
+        $('#rt-tool-value').min = param === 'level' ? 1 : param === 'exp' ? 0 : -999999;
+        $('#rt-tool-value').max = param === 'level' ? a.maxLevel() : param === 'exp' ? 999999999 : 999999;
+        $('#rt-tool-value').value = param === 'level' ? a.level : param === 'exp' ? a.currentExp() : a._paramPlus[Number(param)] || 0;
+        $('#rt-tool-summary').textContent = param === 'level' || param === 'exp' ? 'Progression de '+a.name() : 'Statistique effective : '+a.param(Number(param))+' · modifier ici le bonus permanent.';
+    }
+}
+function renderToolMaps(query) { $('#rt-tool-map').innerHTML = gameTools.maps(query).map(function(m){return '<option value="'+m.id+'">#'+m.id+' · '+esc(m.name)+'</option>';}).join(''); }
+function loadToolMap() {
+    var token = ++toolboxMapToken; toolboxMap = null; $('#rt-map-go').disabled = true;
+    var id = $('#rt-tool-map').value;
+    $('#rt-map-summary').textContent = id ? 'Lecture de la carte…' : 'Aucune carte. Affinez la recherche (200 résultats maximum).';
+    if (!id) return;
+    gameTools.loadMap(id).then(function(map) {
+        if (!opened || modalMode !== 'teleport' || token !== toolboxMapToken) return;
+        toolboxMap = map; $('#rt-map-summary').textContent = map.width+' × '+map.height+' cases';
+        $('#rt-map-x').max = map.width-1; $('#rt-map-y').max = map.height-1;
+        $('#rt-map-x').value = map.id === g.$gameMap.mapId() ? g.$gamePlayer.x : 0;
+        $('#rt-map-y').value = map.id === g.$gameMap.mapId() ? g.$gamePlayer.y : 0;
+        $('#rt-map-go').disabled = false;
+    }).catch(function(e){if (opened && modalMode === 'teleport' && token === toolboxMapToken) say(e.message,true);});
+}
+function toolboxAction(action) {
+    if (action.indexOf('tool-') !== 0) return false;
+    var mode = action.slice(5);
+    if (mode === 'close') closeToolkit();
+    else if (mode === 'home') showToolboxHome();
+    else if (mode === 'editors') { toolboxHome = false; root.classList.remove('rt-home-open'); render(); $('.rt-panel').focus(); }
+    else if (mode === 'translations') { translationScope = 'all'; pendingTranslations = []; openModal('translations','Traductions'); renderTranslations(); }
+    else if (mode === 'party') { openModal('party','Partie'); renderParty(); }
+    else if (mode === 'history') { openModal('history','Historique'); renderHistory(); }
+    else if (mode === 'toggle-god' || mode === 'toggle-noclip') { var key=mode.slice(7); if(key==='god')gameTools.setGod(!gameTools.state().god);else gameTools.setNoclip(!gameTools.state().noclip); toolPage(key); }
+    else if (mode === 'heal') { gameTools.resources($('#rt-tool-actor').value,0,0,0,true); dirty=true;updateToolValues();say('HP, MP et TP restaurés.'); }
+    else toolPage(mode);
+    return true;
+}
+function toolboxSubmit(form) {
+    if (form === 'tool-resources') { gameTools.resources($('#rt-tool-actor').value,$('#rt-tool-hp').value,$('#rt-tool-mp').value,$('#rt-tool-tp').value,false); dirty=true;updateToolValues();say('Ressources mises à jour.');return true; }
+    if (form === 'tool-stats') { gameTools.stat($('#rt-tool-actor').value,$('#rt-tool-param').value,$('#rt-tool-value').value);dirty=true;updateToolValues();say('Statistique mise à jour.');return true; }
+    if (form === 'tool-teleport') { gameTools.teleport(toolboxMap,$('#rt-map-x').value,$('#rt-map-y').value,$('#rt-map-direction').value);closeToolkit();return true; }
+    return false;
 }
 
 })(window);

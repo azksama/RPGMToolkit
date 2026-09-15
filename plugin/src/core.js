@@ -27,7 +27,7 @@ function createToolkitRuntime(g, storage) {
         if (typeof saved.english === 'boolean') prefs.english = saved.english;
         if (/^[a-z]{2}(-[A-Za-z]{2,4})?$/.test(saved.source || '')) prefs.source = saved.source;
         Object.keys(saved.favorites || {}).slice(0, 50000).forEach(function(k) { if (/^[a-zA-Z]+:[0-9]+(?:\.[0-9]+\.[A-D])?$/.test(k)) prefs.favorites[k] = !!saved.favorites[k]; });
-        Object.keys(saved.aliases || {}).slice(0, 50000).forEach(function(k) { if (/^[a-zA-Z]+:[0-9]+(?:\.[0-9]+\.[A-D])?$/.test(k) && validAlias(saved.aliases[k])) prefs.aliases[k] = saved.aliases[k]; });
+        Object.keys(saved.aliases || {}).forEach(function(k) { if (/^[a-zA-Z]+:[0-9]+(?:\.[0-9]+\.[A-D])?$/.test(k) && validAlias(saved.aliases[k])) prefs.aliases[k] = saved.aliases[k]; });
     } catch (e) { storageWarning = true; }
     function ensureSession() {
         if (session !== g.$gameVariables) { removeHooks(); frozen = {}; session = g.$gameVariables; history = []; redo = []; log = []; baseline = {}; cache = {}; }
@@ -297,13 +297,16 @@ function createToolkitRuntime(g, storage) {
         if (a.equips()[slot] !== item) throw new Error('Le moteur a refusé cet équipement.');
         history = []; redo = []; note(a.name() + ' · équipement', old && old.name || '—', item && item.name || '—', false);
     }
-    function setAlias(r, text) {
-        assertRecord(r);
+    function setAliases(records, text) {
+        records.forEach(assertRecord);
         if (typeof text !== 'string' || text.length > 2000) throw new Error('Traduction invalide.');
-        if (text.trim()) prefs.aliases[r.key] = { original: r.original, english: text.trim() };
-        else delete prefs.aliases[r.key];
+        records.forEach(function(r) {
+            if (text.trim()) prefs.aliases[r.key] = { original: r.original, english: text.trim() };
+            else delete prefs.aliases[r.key];
+        });
         savePrefs();
     }
+    function setAlias(r, text) { setAliases([r], text); }
     function importAliases(payload) {
         if (!payload || payload.format !== 'rpgm-toolkit-translations-v1' || !Array.isArray(payload.entries) || payload.entries.length > 50000) throw new Error('Dictionnaire JSON non reconnu.');
         var lookup = {}, staged = [], skipped = 0;
@@ -326,7 +329,7 @@ function createToolkitRuntime(g, storage) {
         canUndo: function() { ensureSession(); return history.length > 0; }, canRedo: function() { ensureSession(); return redo.length > 0; },
         log: function() { ensureSession(); return log; }, capture: capture, changed: changed,
         refresh: function() { ensureSession(); cache = {}; }, savePrefs: savePrefs, storageWarning: function() { return storageWarning; },
-        setAlias: setAlias, importAliases: importAliases,
+        setAlias: setAlias, setAliases: setAliases, importAliases: importAliases,
         exportAliases: function() {
             return { format: 'rpgm-toolkit-translations-v1', project: project, entries: Object.keys(prefs.aliases).map(function(k) { return { key: k, original: prefs.aliases[k].original, english: prefs.aliases[k].english }; }) };
         }
