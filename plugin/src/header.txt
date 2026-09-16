@@ -1,6 +1,6 @@
 /*:
  * @target MZ
- * @plugindesc v1.4.0 (MV/MZ) — Variables, inventaire, acteurs et traductions anglaises.
+ * @plugindesc v1.4.1 (MV/MZ) — Variables, inventaire, acteurs et traductions anglaises.
  * @author RPGM Toolkit
  *
  * @param Hotkey
@@ -34,7 +34,7 @@
  * @text Fermer le Toolkit
  *
  * @help
- * RPGM Toolkit 1.4.0 — RPG Maker MV 1.6+ / MZ
+ * RPGM Toolkit 1.4.1 — RPG Maker MV 1.6+ / MZ
  * Copiez ce fichier dans js/plugins, puis activez RPGMToolkit en dernier
  * dans le gestionnaire de plugins. Chargez une partie et appuyez sur F6.
  * Toolbox ouvre le menu global. Choisissez Éditeurs ou un outil de jeu.

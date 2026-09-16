@@ -17,11 +17,10 @@ function installToolboxUI() {
     var header = $('.rt-modal-dialog > header'), modalBack = $('[data-action="modal-close"]');
     modalBack.textContent = '‹'; modalBack.setAttribute('aria-label','Retour au menu précédent');
     header.insertBefore(modalBack,header.firstChild);
-    var close = document.createElement('button'); close.type = 'button'; close.textContent = '✕'; close.className = 'rt-close'; close.dataset.action = 'tool-close'; close.setAttribute('aria-label','Fermer le Toolkit'); header.insertBefore(close,header.firstChild);
+    var close = document.createElement('button'); close.type = 'button'; close.textContent = '✕'; close.className = 'rt-close'; close.dataset.action = 'modal-dismiss'; close.setAttribute('aria-label','Fermer la fenêtre'); header.insertBefore(close,header.firstChild);
     root.addEventListener('change', function(event) {
         guarded(function() {
             if (event.target.id === 'rt-tool-actor' || event.target.id === 'rt-tool-param') updateToolValues();
-            if (event.target.id === 'rt-tool-toggle') { var mode=event.target.getAttribute('data-mode'); try { if (mode === 'god') gameTools.setGod(event.target.checked); else gameTools.setNoclip(event.target.checked); } finally { event.target.checked=gameTools.state()[mode]; } }
             if (event.target.id === 'rt-tool-map') loadToolMap();
         });
     });
@@ -36,8 +35,8 @@ function showToolboxHome() {
     var entries = [
         ['editors','Éditeurs','Variables, objets, armes, armures…'],
         ['translations','Traductions','Noms anglais · tout traduire et reprendre'],
-        ['god','Godmode',state.god ? 'Activé · équipe protégée' : 'HP au maximum · protection contre K.O.'],
-        ['noclip','No Clip',state.noclip ? 'Activé · obstacles traversables' : 'Traverser les obstacles de la carte'],
+        ['god','Godmode','HP au maximum · protection contre K.O.'],
+        ['noclip','No Clip','Traverser les obstacles de la carte'],
         ['resources','HP / MP','Alliés et ennemis'],
         ['stats','Stats','Niveau, expérience et bonus permanents'],
         ['teleport','Téléportation','Choisir une carte et une position'],
@@ -45,7 +44,10 @@ function showToolboxHome() {
         ['history','Historique','Annuler ou rétablir une modification'],
         ['settings','Paramètres','Langue, affichage et raccourcis']
     ];
-    $('.rt-home-content').innerHTML = entries.map(function(e) { return '<button type="button" data-action="tool-'+e[0]+'"><strong>'+e[1]+'</strong><span>'+e[2]+'</span><b aria-hidden="true">›</b></button>'; }).join('');
+    $('.rt-home-content').innerHTML = entries.map(function(e) {
+        var toggle = e[0] === 'god' || e[0] === 'noclip';
+        return '<button type="button" data-action="tool-'+e[0]+'"'+(toggle ? ' role="switch" aria-checked="'+state[e[0]]+'" aria-label="'+e[1]+'"' : '')+'><strong>'+e[1]+'</strong><span>'+e[2]+'</span>'+(toggle ? '<b class="rt-toggle-track" aria-hidden="true"></b>' : '<b aria-hidden="true">›</b>')+'</button>';
+    }).join('');
     $('.rt-panel').focus();
 }
 function toolActorSelector(all) {
@@ -57,13 +59,8 @@ function quickActions(param) {
     return '<div class="rt-actions rt-stat-quick">'+[['zero','0'],['add','+1000'],['subtract','−1000']].map(function(a){return '<button type="button" data-action="tool-quick" data-param="'+param+'" data-adjust="'+a[0]+'">'+a[1]+'</button>';}).join('')+'</div>';
 }
 function toolPage(mode) {
-    var titles = {god:'Godmode',noclip:'No Clip',resources:'HP / MP',stats:'Stats',teleport:'Téléportation'};
+    var titles = {resources:'HP / MP',stats:'Stats',teleport:'Téléportation'};
     openModal(mode,titles[mode]); var html = '';
-    if (mode === 'god' || mode === 'noclip') {
-        var active = gameTools.state()[mode];
-        html = '<label class="rt-toggle"><span>'+titles[mode]+'</span><input type="checkbox" role="switch" id="rt-tool-toggle" data-mode="'+mode+'"'+(active?' checked':'')+'><span class="rt-toggle-track" aria-hidden="true"></span></label>';
-
-    }
     if (mode === 'resources') html = '<form data-form="tool-resources">'+toolActorSelector(true)+'<p id="rt-tool-summary" class="rt-muted"></p>'+field('HP','rt-tool-hp',0,'number','min="0" step="1" required')+quickActions('hp')+field('MP','rt-tool-mp',0,'number','min="0" step="1" required')+quickActions('mp')+field('TP','rt-tool-tp',0,'number','min="0" step="1" required')+'<div class="rt-actions"><button type="submit" class="rt-primary">Appliquer</button>'+button('Tout restaurer','tool-heal')+'</div></form>';
     if (mode === 'stats') html = '<form data-form="tool-stats">'+toolActorSelector(false)+'<label class="rt-field"><span>Statistique</span><select id="rt-tool-param"><option value="level">Niveau</option><option value="exp">Expérience totale</option>'+['HP max','MP max','Attaque','Défense','Attaque magique','Défense magique','Agilité','Chance'].map(function(n,i){return '<option value="'+i+'">Bonus · '+n+'</option>';}).join('')+'</select></label><p id="rt-tool-summary" class="rt-muted"></p>'+field('Valeur','rt-tool-value',0,'number','step="1" required')+quickActions('stat')+'<button type="submit" class="rt-primary">Appliquer</button></form>';
     if (mode === 'teleport') html = '<form data-form="tool-teleport">'+field('Rechercher une carte · nom ou ID','rt-map-query','','search','autocomplete="off"')+'<label class="rt-field"><span>Carte</span><select id="rt-tool-map"></select></label><p id="rt-map-summary" role="status"></p><div class="rt-coordinate-fields">'+field('X','rt-map-x',0,'number','min="0" step="1" required')+field('Y','rt-map-y',0,'number','min="0" step="1" required')+'</div><label class="rt-field"><span>Direction</span><select id="rt-map-direction"><option value="0">Conserver</option><option value="2">Bas</option><option value="4">Gauche</option><option value="6">Droite</option><option value="8">Haut</option></select></label><button id="rt-map-go" type="submit" class="rt-primary" disabled>Se téléporter</button></form>';
@@ -106,11 +103,12 @@ function toolboxAction(action, node) {
     if (action.indexOf('tool-') !== 0) return false;
     var mode = action.slice(5);
     if (mode === 'close') closeToolkit();
+    else if (mode === 'god' || mode === 'noclip') { if (mode === 'god') gameTools.setGod(!gameTools.state().god); else gameTools.setNoclip(!gameTools.state().noclip); node.setAttribute('aria-checked', String(gameTools.state()[mode])); }
     else if (mode === 'home') showToolboxHome();
     else if (mode === 'editors') { toolboxHome = false; root.classList.remove('rt-home-open'); render(); $('.rt-panel').focus(); }
     else if (mode === 'settings') renderSettings();
     else if (mode === 'quick') { var param=node.getAttribute('data-param'), adjust=node.getAttribute('data-adjust'), target=$('#rt-tool-actor').value; if (param === 'stat') gameTools.adjustStat(target,$('#rt-tool-param').value,adjust); else gameTools.adjustResource(target,param,adjust); dirty=true; updateToolValues(); }
-    else if (mode === 'translations') { translationScope = 'all'; pendingTranslations = []; openModal('translations','Traductions'); renderTranslations(); }
+    else if (mode === 'translations') { if (!translator.busy()) { translationScope = 'all'; pendingTranslations = []; } openModal('translations','Traductions'); renderTranslations(); }
     else if (mode === 'party') { openModal('party','Partie'); renderParty(); }
     else if (mode === 'history') { openModal('history','Historique'); renderHistory(); }
     else if (mode === 'heal') { gameTools.resources($('#rt-tool-actor').value,0,0,0,true); dirty=true;updateToolValues();say('HP, MP et TP restaurés.'); }

@@ -81,3 +81,15 @@ test('validates all names before requests, ignores blank/already translated and 
  await assert.rejects(translator.translate([record(),record('variables:2','進'.repeat(167))],'ja'),/500/);assert.equal(requests.length,0);
  aliases['variables:2']='Cached';assert.equal(await translator.translate([record(),record(),record('variables:2'),record('variables:3',' ')],'ja'),1);assert.equal(requests.length,1);
 });
+const {fixture}=require('./runtime-fixture.cjs');
+test('pending translations survive catalog refresh and persist against current records',async()=>{
+ const {g,r,storage}=fixture();const instances=[];
+ g.XMLHttpRequest=function(){instances.push(this);};
+ g.XMLHttpRequest.prototype.open=function(){};g.XMLHttpRequest.prototype.send=function(){};g.XMLHttpRequest.prototype.abort=function(){this.onabort();};
+ vm.runInContext(fs.readFileSync(path.join(__dirname,'../src/translation.js'),'utf8'),g);
+ const translator=g.createToolkitTranslator(r,g),original=r.list('variables')[0];
+ const done=translator.translate([original],'ja');await flush();r.refresh();
+ assert.notEqual(r.list('variables')[0],original);deliver(instances[0],'Progress');assert.equal(await done,1);
+ assert.equal(r.alias(r.list('variables')[0]),'Progress');
+ assert.equal(g.createToolkitRuntime(g,storage).alias(original),'Progress');
+});

@@ -137,3 +137,8 @@
 .rt .rt-stat-quick { margin:-5px 0 14px; }
 .rt .rt-stat-quick button { flex:1; }
 .rt .rt-import { margin-top:12px; }
+
+.rt .rt-home-content button[role="switch"] { padding-right:72px; }
+.rt .rt-home-content .rt-toggle-track { top:50%; margin-top:-14px; }
+.rt .rt-home-content [aria-checked="true"] .rt-toggle-track { background:#4272ac; border-color:#a0c5f4; }
+.rt .rt-home-content [aria-checked="true"] .rt-toggle-track::after { transform:translateX(19px); }

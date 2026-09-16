@@ -63,7 +63,10 @@ function createToolkitTranslator(runtime, g) {
                         var result = source === 'en' ? Promise.resolve(original) : request(run, original, source);
                         result.then(function(english) {
                             check(run);
-                            var missing = group.filter(function(r) { return !runtime.alias(r); });
+                            var missing = group.map(function(r) {
+                                if (!runtime.list) return r;
+                                return runtime.list(r.kind).filter(function(current) { return current.key === r.key && current.original === r.original; })[0];
+                            }).filter(function(r) { return r && !runtime.alias(r); });
                             if (missing.length) runtime.setAliases(missing, english);
                             run.completed += group.length;
                             if (progress) progress(run.completed, total);

@@ -100,7 +100,7 @@ function buildRoot() {
     });
 }
 function renderNav() {
-    $('#rt-category').innerHTML = Object.keys(labels).map(function(k) { return '<option value="' + k + '">' + esc(labels[k]) + '</option>'; }).join('');
+    $('#rt-category').innerHTML = Object.keys(labels).filter(function(k) { return k !== 'translations'; }).map(function(k) { return '<option value="' + k + '">' + esc(labels[k]) + '</option>'; }).join('');
     $('#rt-category').value = tab;
 }
 function render() {
@@ -259,11 +259,14 @@ function changed(message, actorChange) {
     say(message + (actorChange ? ' · Pile d’annulation réinitialisée.' : ''));
 }
 function translateChoice(records) {
-    translationScope = 'selection'; translationProgress = '';
-    pendingTranslations = records.filter(function(r) { return r.original.trim() && !runtime.alias(r); });
+    if (!translator.busy()) {
+        translationScope = 'selection'; translationProgress = '';
+        pendingTranslations = records.filter(function(r) { return r.original.trim() && !runtime.alias(r); });
+    }
     openModal('translations', 'Traduction'); renderTranslations();
 }
 function startTranslation() {
+    if (translator.busy()) return;
     var batch = translationRecords();
     if (!batch.length) { say('Aucun nom restant à traduire.'); return; }
     var run = ++translationRun;
@@ -280,6 +283,7 @@ function startTranslation() {
         if (opened && modalMode === 'translations') { renderTranslations(); say(count + ' nom(s) traduit(s).' + (runtime.storageWarning() ? ' Stockage indisponible : exportez le dictionnaire.' : ' Enregistrés localement.')); }
     }).catch(function(e) {
         if (run !== translationRun) return;
+        translationProgress = e.message;
         if (opened && modalMode === 'translations') { renderTranslations(); say(e.message, true); }
     });
     renderTranslations();
@@ -305,7 +309,7 @@ function importFile(file) {
 function act(action, node) {
     if (toolboxAction(action, node)) return;
     var r, id;
-    if (action === 'modal-close' || action === 'back-results') { closeModal(); return; }
+    if (action === 'modal-close' || action === 'modal-dismiss' || action === 'back-results') { closeModal(); return; }
     if (action === 'select') { selected = found[Number(node.getAttribute('data-index'))]; openModal('edit', 'Éditer · #' + selected.id); $('.rt-modal-content').innerHTML = '<div class="rt-detail"></div>'; renderDetail(); return; }
     if (action === 'clear-selection') { checked = {}; renderList(); return; }
     if (action === 'translate-selection') { translateChoice(picked().length ? picked() : found.slice(page*pageSize,(page+1)*pageSize)); return; }
@@ -397,12 +401,12 @@ function refreshSceneWindows() {
 }
 function closeToolkit() {
     if (!opened) return;
-    opened = false; closeModal(); translationRun++; clearTimeout(searchTimer); if (translator) translator.cancel(); root.hidden = true;
+    opened = false; closeModal(); clearTimeout(searchTimer); root.hidden = true;
     clearInput(); refreshSceneWindows();
     if (previousFocus && document.contains(previousFocus)) previousFocus.focus();
 }
 function toggleToolkit() { return opened ? closeToolkit() : openToolkit(); }
-g.RPGMToolkit = { version: '1.4.0', open: openToolkit, close: closeToolkit, toggle: toggleToolkit, isOpen: function() { return opened; } };
+g.RPGMToolkit = { version: '1.4.1', open: openToolkit, close: closeToolkit, toggle: toggleToolkit, isOpen: function() { return opened; } };
 var heldCloseKey = null;
 g.addEventListener('keydown', function(event) {
     var key = event.key || ({ 117: 'F6', 118: 'F7', 121: 'F10', 27: 'Escape' }[event.keyCode]);

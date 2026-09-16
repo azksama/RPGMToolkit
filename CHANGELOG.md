@@ -1,5 +1,13 @@
 # Versions
 
+## 1.4.1 — Navigation et traduction en arrière-plan
+
+- La croix d’une fenêtre revient au Toolkit sans fermer le mod.
+- Godmode et No Clip s’activent directement dans Toolbox.
+- Traductions retiré du sélecteur de catégories des éditeurs.
+- La traduction continue panneau fermé et après sa réouverture ; les résultats restent enregistrés.
+
+
 ## 1.4.0 — Paramètres et commandes de combat
 
 Interface allégée, descriptions du menu conservées. Barres de défilement visibles et déplaçables, interrupteurs Godmode/No Clip, suppression du dictionnaire local. Paramètres par jeu : langue français/anglais, taille du texte, largeur du défilement, pagination, raccourci et bouton Toolbox. Accès en combat et modification des HP/MP ennemis. Actions 0, +1000 et −1000 dans HP/MP et Stats, sans ajout dans les éditeurs.

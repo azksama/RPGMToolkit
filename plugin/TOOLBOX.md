@@ -1,6 +1,6 @@
-# Toolbox 1.4.0
+# Toolbox 1.4.1
 
-Sur une carte ou un combat chargé, **Toolbox** (en haut à gauche) ou F6 ouvre le menu global. Chaque bouton ouvre un sous-menu. **‹** revient au menu précédent, **✕** ferme le panneau et reprend le jeu.
+Sur une carte ou un combat chargé, **Toolbox** (en haut à gauche) ou F6 ouvre le menu global. Godmode et No Clip se basculent directement dans ce menu ; les autres boutons ouvrent un sous-menu. **‹** et la croix d’une fenêtre reviennent au menu précédent. La croix du panneau principal ferme le Toolkit et reprend le jeu.
 
 - **Éditeurs** : variables, interrupteurs, objets, armes, armures, acteurs, compétences et états. Recherche, actions rapides, favoris, gel et édition groupée. Les icônes sont celles de l’IconSet du jeu.
 - **Traductions** : sélectionner la page/sélection, toute la catégorie ou **Tout le jeu**, puis lancer la traduction. Cette dernière option couvre tous les noms chargés du catalogue ; les interrupteurs locaux concernent la carte actuelle.
@@ -17,7 +17,7 @@ Godmode et No Clip restent actifs quand on ferme le panneau, mais se désactiven
 
 MyMemory reçoit uniquement les noms, jamais les valeurs des variables. Les demandes sont explicites, avec trois requêtes simultanées au maximum. Les noms identiques sont regroupés dans une opération, et les alias existants sont ignorés. La limite du service reste de 500 octets par nom ; un nom trop long doit recevoir un alias manuel avant de relancer l’opération. Le quota et la vitesse du service restent indépendants du Toolkit.
 
-Chaque groupe traduit est immédiatement enregistré dans le stockage local du jeu. Fermer le panneau annule les requêtes en cours ; **Arrêter** les annule aussi. Les résultats déjà reçus sont conservés. Relancer **Tout traduire** reprend uniquement les noms manquants, y compris après fermeture du jeu. Le téléchargement ne reprend pas automatiquement sans clic.
+Chaque groupe traduit est immédiatement enregistré dans le stockage local du jeu. Fermer le panneau laisse la traduction continuer pendant le jeu. **Arrêter** annule les requêtes en cours. Fermer le jeu ou charger une autre partie interrompt le traitement. Les résultats déjà reçus sont conservés. Relancer **Tout traduire** reprend uniquement les noms manquants, y compris après fermeture du jeu. Le téléchargement ne reprend pas automatiquement sans clic.
 
 Les alias sont indépendants de la sauvegarde de partie et ne changent que l’affichage du Toolkit. Ils restent disponibles après fermeture tant que le jeu utilise le même stockage navigateur (origine, chemin et titre). Effacer les données de JoiPlay, changer d’origine/port de lancement ou déplacer le jeu peut rendre ce stockage indisponible. **Exporter les traductions** permet d’en garder une copie et **Importer un dictionnaire JSON** de les restaurer. Si le stockage est plein ou bloqué, l’interface le signale : exportez les résultats encore en mémoire.
 
@@ -25,7 +25,7 @@ MyMemory n’est pas obligatoire pour les dictionnaires : **Exporter les noms à
 
 ## Mise à jour
 
-Fermez le jeu, installez l’APK 1.4.0, puis **Mod inclus → jeu → Réinstaller / mettre à jour**. Mettre à jour l’application seule ne remplace pas le plugin déjà installé dans le jeu. Alternative : remplacer `js/plugins/RPGMToolkit.js` (ou `www/js/plugins/RPGMToolkit.js`) par le fichier de la nouvelle archive du mod.
+Fermez le jeu, installez l’APK 1.4.1, puis **Mod inclus → jeu → Réinstaller / mettre à jour**. Mettre à jour l’application seule ne remplace pas le plugin déjà installé dans le jeu. Alternative : remplacer `js/plugins/RPGMToolkit.js` (ou `www/js/plugins/RPGMToolkit.js`) par le fichier de la nouvelle archive du mod.
 
 ## Validation
 
