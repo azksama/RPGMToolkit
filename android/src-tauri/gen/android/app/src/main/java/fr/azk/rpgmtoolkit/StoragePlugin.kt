@@ -20,6 +20,8 @@ import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.Executors
 import org.json.JSONObject
+import org.json.JSONArray
+import android.provider.DocumentsContract
 
 @InvokeArg class PickArgs { var kind: String = "zip" }
 @InvokeArg class ApplyArgs { var token: String = ""; var registry: String = ""; var plugin: String? = null; var expected: String = ""; var uninstall: Boolean = false }
@@ -29,8 +31,8 @@ import org.json.JSONObject
 @TauriPlugin
 class StoragePlugin(private val activity: Activity) : Plugin(activity) {
     private val io = Executors.newSingleThreadExecutor()
-    private var selectedRoot: DocumentFile? = null
-    private var selectedToken: String = ""
+    private val roots = mutableMapOf<String, DocumentFile>()
+    private val rootTokens = mutableMapOf<String, String>()
     private var pickKind = "zip"
     private var pendingExport: File? = null
     private var originalZip: Uri? = null
@@ -72,24 +74,67 @@ class StoragePlugin(private val activity: Activity) : Plugin(activity) {
         require(directory.isDirectory) { "$name est déjà utilisé par un fichier." }
         return directory
     }
-    private fun engine(root: DocumentFile): String? {
-        val js = root.findFile("js") ?: return null
-        if (js.findFile("plugins.js")?.isFile != true) return null
-        return if (js.findFile("rmmz_core.js")?.isFile == true) "MZ" else if (js.findFile("rpg_core.js")?.isFile == true) "MV" else null
+    private fun identity(root: DocumentFile): String = root.uri.authority + ":" + DocumentsContract.getDocumentId(root.uri)
+    private fun register(root: DocumentFile): String {
+        val key = identity(root)
+        val token = rootTokens.getOrPut(key) { UUID.randomUUID().toString() }
+        roots[token] = root
+        return token
     }
-    private fun locate(root: DocumentFile): DocumentFile {
-        if (engine(root) != null) return root
-        root.findFile("www")?.let { if (engine(it) != null) return it }
-        val found = mutableListOf<DocumentFile>()
-        // One enclosing folder is accepted. Never crawl a whole phone or every asset.
-        val children = root.listFiles()
-        require(children.size <= 500) { "Choisissez directement le dossier du jeu : ce dossier contient trop d’entrées." }
-        children.filter { it.isDirectory }.forEach { child ->
-            if (engine(child) != null) found.add(child)
-            else child.findFile("www")?.let { if (engine(it) != null) found.add(it) }
+    private fun entries(parent: DocumentFile): List<ScanEntry<DocumentFile>> {
+        require(parent.canRead()) { "Lecture refusée." }
+        val projection = arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME, DocumentsContract.Document.COLUMN_MIME_TYPE)
+        val uri = DocumentsContract.buildChildDocumentsUriUsingTree(parent.uri, DocumentsContract.getDocumentId(parent.uri))
+        val metadata = mutableMapOf<String, Pair<String, Boolean>>()
+        (activity.contentResolver.query(uri, projection, null, null, null) ?: error("Lecture du dossier impossible.")).use { cursor ->
+            while (cursor.moveToNext()) {
+                require(metadata.size < 100000) { "Trop d’entrées dans ce dossier." }
+                metadata[cursor.getString(0)] = Pair(cursor.getString(1) ?: "", cursor.getString(2) == DocumentsContract.Document.MIME_TYPE_DIR)
+            }
         }
-        require(found.size == 1) { if (found.isEmpty()) "Aucun jeu MV/MZ détecté. Choisissez son dossier contenant js, ou www." else "Plusieurs jeux détectés. Choisissez le dossier d’un seul jeu." }
-        return found.first()
+        return parent.listFiles().mapNotNull { file -> metadata[DocumentsContract.getDocumentId(file.uri)]?.let { ScanEntry(file, it.first, it.second) } }
+    }
+    private fun scan(root: DocumentFile): JSObject {
+        val scanner = GameScanner<DocumentFile>(
+            children = ::entries,
+            identity = ::identity
+        )
+        val report = scanner.scan(root, root.name ?: "Dossier")
+        val games = JSONArray()
+        report.games.forEach { candidate ->
+            val token = register(candidate.node)
+            val value = JSObject().put("title", candidate.node.name ?: "Jeu")
+            if (candidate.legacy) value.put("error", "RPG Maker VX/Ace/XP/2000/2003 n’est pas compatible avec ce mod.")
+            games.put(value.put("token", token).put("path", candidate.path))
+        }
+        return JSObject().put("games", games).put("warnings", JSONArray(report.warnings))
+    }
+    private fun compatibility(root: DocumentFile): String {
+        require(root.canRead() && root.canWrite()) { "Dossier en lecture seule ou accès refusé." }
+        val js = root.findFile("js") ?: error("Dossier js absent.")
+        require(js.canWrite()) { "Le dossier js est en lecture seule." }
+        val mv = js.findFile("rpg_core.js")?.takeIf { it.isFile }
+        val mz = js.findFile("rmmz_core.js")?.takeIf { it.isFile }
+        require((mv != null) != (mz != null)) { "Moteur MV/MZ absent ou ambigu." }
+        val core = text((mz ?: mv)!!)
+        val version = Regex("RPGMAKER_VERSION\\s*=\\s*[\"'](\\d+)\\.(\\d+)(?:\\.\\d+)?[\"']").find(core)
+            ?: error("Version du moteur non reconnue.")
+        val major = version.groupValues[1].toInt()
+        val minor = version.groupValues[2].toInt()
+        require(major == 1 && (mz != null || minor >= 6)) { "Version non prise en charge : MV 1.6+ ou MZ 1.x requis." }
+        val prefix = if (mz != null) "rmmz" else "rpg"
+        listOf("plugins.js", "main.js", "${prefix}_managers.js", "${prefix}_objects.js", "${prefix}_scenes.js", "${prefix}_sprites.js", "${prefix}_windows.js").forEach {
+            require(js.findFile(it)?.isFile == true) { "Fichier requis absent : js/$it" }
+        }
+        require(js.findFile("plugins.js")?.canWrite() == true) { "plugins.js est en lecture seule." }
+        js.findFile("plugins")?.let { plugins ->
+            require(plugins.isDirectory && plugins.canWrite()) { "Dossier js/plugins inaccessible." }
+            plugins.findFile("RPGMToolkit.js")?.let { require(it.isFile && it.canWrite()) { "RPGMToolkit.js est en lecture seule." } }
+        }
+        require(root.findFile("index.html")?.isFile == true) { "Fichier requis absent : index.html" }
+        val system = root.findFile("data")?.findFile("System.json") ?: error("Fichier requis absent : data/System.json")
+        JSONObject(text(system).removePrefix("\uFEFF"))
+        return if (mz != null) "MZ" else "MV"
     }
     private fun pending(root: DocumentFile): Pair<DocumentFile, JSONObject>? {
         val marker = root.findFile(markerName) ?: return null
@@ -100,6 +145,7 @@ class StoragePlugin(private val activity: Activity) : Plugin(activity) {
         return Pair(backup, data)
     }
     private fun inspect(root: DocumentFile): JSObject {
+        val detectedEngine = compatibility(root)
         val js = root.findFile("js") ?: error("Dossier js absent.")
         val recovery = pending(root)
         val registry = if (recovery != null) text(recovery.first.findFile("plugins.js") ?: error("Copie de secours absente.")) else text(js.findFile("plugins.js") ?: error("plugins.js absent."))
@@ -107,7 +153,7 @@ class StoragePlugin(private val activity: Activity) : Plugin(activity) {
         val title = try { root.findFile("data")?.findFile("System.json")?.let { JSONObject(text(it).removePrefix("\uFEFF")).optString("gameTitle") } } catch (_: Exception) { null }
         return JSObject().put("kind", "folder").put("registry", registry).put("plugin", plugin ?: JSONObject.NULL)
             .put("title", title?.takeIf { it.isNotBlank() } ?: root.name ?: "Jeu RPG Maker")
-            .put("engine", engine(root) ?: error("Moteur du jeu absent."))
+            .put("engine", detectedEngine)
             .put("name", root.name ?: "Jeu").put("recoveryNeeded", recovery != null)
     }
     @Command fun pick(invoke: Invoke) {
@@ -132,9 +178,9 @@ class StoragePlugin(private val activity: Activity) : Plugin(activity) {
             if (kind == "folder") {
                 val flags = result.data!!.flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
                 try { activity.contentResolver.takePersistableUriPermission(uri, flags) } catch (_: SecurityException) { /* Session grant still works. */ }
-                val root = locate(DocumentFile.fromTreeUri(activity, uri) ?: error("Ce dossier n’est pas accessible."))
-                require(root.canRead() && root.canWrite()) { "Accordez l’accès en lecture et écriture à ce dossier." }
-                val snapshot = inspect(root); selectedRoot = root; selectedToken = UUID.randomUUID().toString(); snapshot.put("token", selectedToken)
+                val root = DocumentFile.fromTreeUri(activity, uri) ?: error("Ce dossier n’est pas accessible.")
+                require(root.canRead()) { "Accordez l’accès en lecture à ce dossier." }
+                scan(root)
             } else {
                 var name = "game.zip"
                 var size = -1L
@@ -158,12 +204,20 @@ class StoragePlugin(private val activity: Activity) : Plugin(activity) {
             }
         }
     }
-    private fun checkedRoot(token: String): DocumentFile { require(token.isNotEmpty() && token == selectedToken) { "La sélection du dossier a changé. Sélectionnez le jeu à nouveau." }; return selectedRoot ?: error("Sélectionnez un dossier.") }
+    private fun checkedRoot(token: String): DocumentFile = roots[token] ?: error("Sélectionnez le dossier à nouveau.")
+    @Command fun forgetFolder(invoke: Invoke) {
+        val args = invoke.parseArgs(FolderArgs::class.java)
+        background(invoke) {
+            roots.remove(args.token)?.let { rootTokens.remove(identity(it)) }
+            JSObject()
+        }
+    }
     @Command fun inspectFolder(invoke: Invoke) { val args = invoke.parseArgs(FolderArgs::class.java); background(invoke) { inspect(checkedRoot(args.token)) } }
     @Command fun applyFolder(invoke: Invoke) {
         val args = invoke.parseArgs(ApplyArgs::class.java)
         background(invoke) {
             val root = checkedRoot(args.token)
+            compatibility(root)
             require(pending(root) == null) { "Restaurez d’abord l’opération interrompue." }
             val js = root.findFile("js") ?: error("Dossier js absent.")
             val registryFile = js.findFile("plugins.js") ?: error("plugins.js absent.")

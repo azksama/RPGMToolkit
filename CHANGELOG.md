@@ -1,5 +1,14 @@
 # Versions
 
+## 1.5.0 — Installation de bibliothèques Android
+
+- Ajout de plusieurs dossiers et recherche récursive des jeux MV/MZ.
+- Liste sélectionnable avec compatibilité, état du mod et action prévue.
+- Installation, mise à jour et désinstallation groupées, résultats séparés par jeu.
+- Déduplication des dossiers, jeux déjà à jour ignorés, vérification avant écriture et sauvegarde de secours par jeu.
+- Mod embarqué inchangé : 1.4.1.
+
+
 ## 1.4.1 — Navigation et traduction en arrière-plan
 
 - La croix d’une fenêtre revient au Toolkit sans fermer le mod.
