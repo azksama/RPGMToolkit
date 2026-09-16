@@ -1,4 +1,4 @@
-# Toolbox 1.4.1
+# Toolbox 1.6.0
 
 Sur une carte ou un combat chargé, **Toolbox** (en haut à gauche) ou F6 ouvre le menu global. Godmode et No Clip se basculent directement dans ce menu ; les autres boutons ouvrent un sous-menu. **‹** et la croix d’une fenêtre reviennent au menu précédent. La croix du panneau principal ferme le Toolkit et reprend le jeu.
 
@@ -25,7 +25,7 @@ MyMemory n’est pas obligatoire pour les dictionnaires : **Exporter les noms à
 
 ## Mise à jour
 
-Fermez le jeu, installez l’APK 1.4.1, puis **Mod inclus → jeu → Réinstaller / mettre à jour**. Mettre à jour l’application seule ne remplace pas le plugin déjà installé dans le jeu. Alternative : remplacer `js/plugins/RPGMToolkit.js` (ou `www/js/plugins/RPGMToolkit.js`) par le fichier de la nouvelle archive du mod.
+Fermez le jeu, installez l’APK 1.6.0, puis **Mod inclus → jeu → Réinstaller / mettre à jour**. Mettre à jour l’application seule ne remplace pas le plugin déjà installé dans le jeu. Alternative : remplacer `js/plugins/RPGMToolkit.js` (ou `www/js/plugins/RPGMToolkit.js`) par le fichier de la nouvelle archive du mod.
 
 ## Validation
 

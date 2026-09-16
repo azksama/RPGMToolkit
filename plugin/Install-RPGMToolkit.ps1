@@ -11,6 +11,7 @@ Set-StrictMode -Version 2
 $pluginName = 'RPGMToolkit'
 $packagePlugin = Join-Path $PSScriptRoot 'RPGMToolkit.js'
 $utf8 = New-Object System.Text.UTF8Encoding($false)
+. (Join-Path $PSScriptRoot 'Read-PluginRegistry.ps1')
 
 function Write-AtomicText([string]$Path, [string]$Content) {
     $temporary = $Path + '.rpgm-' + [Guid]::NewGuid().ToString('N') + '.tmp'
@@ -64,12 +65,12 @@ try {
     $sha = [Security.Cryptography.SHA256]::Create()
     try { $listHashBefore = [BitConverter]::ToString($sha.ComputeHash($originalBytes)).Replace('-', '') } finally { $sha.Dispose() }
     $originalText = [IO.File]::ReadAllText($listPath)
-    $match = [regex]::Match($originalText, '(?s)\A(?<prefix>.*?\b(?:var|let|const)\s+\$plugins\s*=\s*)(?<json>\[.*\])(?<suffix>\s*;?\s*)\z')
+    $match = [regex]::Match($originalText, '(?s)\A(?<prefix>.*?\b(?:var|let|const)\s+\$plugins\s*=\s*)(?<json>\[.*\])(?<suffix>(?:\s|;|//[^\r\n]*(?:\r?\n|\z)|/\*.*?\*/)*)\z')
     if (-not $match.Success) { throw 'plugins.js utilise un format non standard. Installez manuellement via le gestionnaire de plugins ; aucun fichier modifie.' }
     try {
-        $parsedEntries = ConvertFrom-Json -InputObject $match.Groups['json'].Value
+        $parsedEntries = ConvertFrom-PluginLiteral $match.Groups['json'].Value
         $entries = @($parsedEntries)
-    } catch { throw 'La liste de plugins ne contient pas un tableau JSON standard. Aucun fichier modifie.' }
+    } catch { throw "Liste de plugins illisible : $($_.Exception.Message). Aucun fichier modifie." }
     foreach ($entry in $entries) {
         if ($null -eq $entry -or -not $entry.PSObject.Properties['name'] -or $entry.name -isnot [string]) { throw 'Entree de plugin invalide. Aucun fichier modifie.' }
     }
@@ -83,7 +84,7 @@ try {
             $entry = $existing[0]
             $entry | Add-Member -NotePropertyName status -NotePropertyValue $true -Force
         } else {
-            $entry = [pscustomobject]@{ name = $pluginName; status = $true; description = 'RPGM Toolkit 1.4.1'; parameters = [pscustomobject]@{ Hotkey = 'F6'; ShowButton = 'true'; PlaytestOnly = 'false'; PageSize = '60' } }
+            $entry = [pscustomobject]@{ name = $pluginName; status = $true; description = 'RPGM Toolkit 1.6.0'; parameters = [pscustomobject]@{ Hotkey = 'F6'; ShowButton = 'true'; PlaytestOnly = 'false'; PageSize = '60' } }
         }
         $newEntries += $entry
     }

@@ -30,6 +30,7 @@ import android.provider.DocumentsContract
 
 @TauriPlugin
 class StoragePlugin(private val activity: Activity) : Plugin(activity) {
+    private val rgss = RgssStorage(activity)
     private val io = Executors.newSingleThreadExecutor()
     private val roots = mutableMapOf<String, DocumentFile>()
     private val rootTokens = mutableMapOf<String, String>()
@@ -104,7 +105,7 @@ class StoragePlugin(private val activity: Activity) : Plugin(activity) {
         report.games.forEach { candidate ->
             val token = register(candidate.node)
             val value = JSObject().put("title", candidate.node.name ?: "Jeu")
-            if (candidate.legacy) value.put("error", "RPG Maker VX/Ace/XP/2000/2003 n’est pas compatible avec ce mod.")
+            if (candidate.legacy && candidate.node.findFile("Game.ini") == null) value.put("error", "Game.ini absent ou moteur 2000/2003 non pris en charge.")
             games.put(value.put("token", token).put("path", candidate.path))
         }
         return JSObject().put("games", games).put("warnings", JSONArray(report.warnings))
@@ -120,8 +121,7 @@ class StoragePlugin(private val activity: Activity) : Plugin(activity) {
         val version = Regex("RPGMAKER_VERSION\\s*=\\s*[\"'](\\d+)\\.(\\d+)(?:\\.\\d+)?[\"']").find(core)
             ?: error("Version du moteur non reconnue.")
         val major = version.groupValues[1].toInt()
-        val minor = version.groupValues[2].toInt()
-        require(major == 1 && (mz != null || minor >= 6)) { "Version non prise en charge : MV 1.6+ ou MZ 1.x requis." }
+        require(major == 1) { "Version de moteur inconnue : MV/MZ 1.x requis." }
         val prefix = if (mz != null) "rmmz" else "rpg"
         listOf("plugins.js", "main.js", "${prefix}_managers.js", "${prefix}_objects.js", "${prefix}_scenes.js", "${prefix}_sprites.js", "${prefix}_windows.js").forEach {
             require(js.findFile(it)?.isFile == true) { "Fichier requis absent : js/$it" }
@@ -144,7 +144,12 @@ class StoragePlugin(private val activity: Activity) : Plugin(activity) {
         val backup = root.findFile(".rpgm-toolkit-backups")?.findFile(id) ?: error("La copie de secours de l’opération interrompue est introuvable.")
         return Pair(backup, data)
     }
+    private fun isRgss(root: DocumentFile): Boolean {
+        val js = root.findFile("js")
+        return root.findFile(RgssStorage.MARKER) != null || (root.findFile("Game.ini") != null && js?.findFile("rpg_core.js") == null && js?.findFile("rmmz_core.js") == null)
+    }
     private fun inspect(root: DocumentFile): JSObject {
+        if (isRgss(root)) return rgss.inspect(root)
         val detectedEngine = compatibility(root)
         val js = root.findFile("js") ?: error("Dossier js absent.")
         val recovery = pending(root)
@@ -217,6 +222,7 @@ class StoragePlugin(private val activity: Activity) : Plugin(activity) {
         val args = invoke.parseArgs(ApplyArgs::class.java)
         background(invoke) {
             val root = checkedRoot(args.token)
+            if (isRgss(root)) return@background rgss.apply(root, args)
             compatibility(root)
             require(pending(root) == null) { "Restaurez d’abord l’opération interrompue." }
             val js = root.findFile("js") ?: error("Dossier js absent.")
@@ -247,6 +253,7 @@ class StoragePlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
     private fun restore(root: DocumentFile) {
+        if (root.findFile(RgssStorage.MARKER) != null) { rgss.restore(root); return }
         val (backup, data) = pending(root) ?: return
         val registry = bytes(backup.findFile("plugins.js") ?: error("Copie de plugins.js absente."))
         require(hash(registry) == data.getString("registrySha256")) { "Copie de secours du registre endommagée." }

@@ -1,6 +1,6 @@
 [package]
 name = "rpgm-installer"
-version = "1.5.0"
+version = "1.6.0"
 edition = "2021"
 
 [lib]
@@ -17,6 +17,9 @@ serde_json = "1"
 sha2 = "0.10"
 regex = "1"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+json5 = "0.4"
+base64 = "0.22"
+flate2 = "1"
 
 [dev-dependencies]
 tempfile = "3"

@@ -1,3 +1,19 @@
+# Validation 1.6.0
+
+- 43 tests JavaScript : éditeurs, traductions, outils et cycle de vie des scènes.
+- 24 assertions de l’installateur PowerShell, dont les littéraux JavaScript avec clés japonaises et échappements.
+- 17 tests Rust : parseur, profondeur bornée, Marshal, archives RGSSAD, ZIP et bibliothèques.
+- 6 tests Kotlin : scanner, Game.ini et extraction des archives RGSSAD v1/v3.
+- Tests navigateur : bibliothèque et deux suites mobiles, sans régression de l’interface 1.5.
+- Simulation Ruby des trois API RGSS en 640×480, 544×416 et 640×360 : édition, inventaire, freeze, Godmode, No Clip, HP ennemis, persistance et géométrie.
+- Émulateur Android : installation puis désinstallation groupées de neuf fixtures. XP/VX/VX Ace, chacun libre et archivé ; MV 1.0, MV 1.5 et MZ avec registre JavaScript non JSON. Neuf succès, aucune erreur. Game.ini, scripts d’origine, archives et sauvegardes comparés octet par octet ; paramètres des plugins conservés.
+- Les scripts réécrits ont été relus avec Ruby Marshal et décompressés avec Zlib : scripts originaux et noms Unicode conservés.
+- APK universel signé : ARM64, ARMv7, x86_64. Alignement 16 Ko vérifié, signature identique aux versions précédentes, modules JS et Ruby embarqués vérifiés octet par octet.
+
+Ces essais utilisent des fixtures et des API simulées. Aucun test sur un téléphone physique, un jeu commercial réel ou un runtime RGSS original/JoiPlay n’est revendiqué. La traduction réseau RGSS dépend des bibliothèques du runtime ; l’import TSV et les alias persistants sont testés localement.
+
+---
+
 # Validation du correctif 1.0.1
 
 Le plantage MZ `isClosing` signalé est reproduit avec le plugin 1.0.0 puis absent avec le plugin 1.0.1 sur un banc de cycle de scène différé MV/MZ. Les 23 tests JavaScript, la syntaxe ES5, les 22 assertions de l’installateur Windows et les 6 tests Rust passent.

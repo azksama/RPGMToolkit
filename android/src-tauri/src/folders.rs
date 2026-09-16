@@ -28,10 +28,12 @@ impl FolderGame {
 
     pub fn set_snapshot(&mut self, mut snapshot: Snapshot) {
         self.mod_hash = snapshot.previous_mod.take().map(|code| engine::hash(code.as_bytes()));
+        if crate::rgss::legacy(&snapshot.info.engine) { snapshot.registry.clear(); }
         self.snapshot = Some(snapshot);
     }
 
     pub fn plan(&self, code: &str) -> &'static str {
+        let code = if self.snapshot.as_ref().is_some_and(|s| crate::rgss::legacy(&s.info.engine)) { crate::rgss::CODE } else { code };
         if self.error.is_some() { return "blocked"; }
         let Some(snapshot) = &self.snapshot else { return "blocked"; };
         if snapshot.info.recovery_needed { return "recover"; }
@@ -53,6 +55,7 @@ impl FolderGame {
         let result = (|| {
             let expected = self.snapshot.as_ref().ok_or_else(|| self.error.clone().unwrap_or("Jeu incompatible.".into()))?.info.fingerprint.clone();
             let fresh = folder_snapshot(&native("inspectFolder", json!({"token":self.token}))?)?;
+            let registry = fresh.registry.clone();
             let changed = fresh.info.fingerprint != expected;
             self.title = fresh.info.title.clone();
             self.set_snapshot(fresh);
@@ -65,7 +68,8 @@ impl FolderGame {
                 self.result = if uninstall { "absent" } else { "current" }.into();
                 return Ok(());
             }
-            let patched = engine::patch_registry(&snapshot.registry, uninstall)?;
+            let code = if crate::rgss::legacy(&snapshot.info.engine) { crate::rgss::CODE } else { code };
+            let patched = if crate::rgss::legacy(&snapshot.info.engine) { crate::rgss::patch(&registry,uninstall)? } else { engine::patch_snapshot(snapshot, uninstall)? };
             let data = native("applyFolder", json!({"token":self.token,"registry":patched,"plugin":if uninstall {None}else{Some(code)},"expected":snapshot.info.fingerprint,"uninstall":uninstall}))?;
             let checked = folder_snapshot(&data)?;
             if checked.info.status != if uninstall { "absent" } else { "installed" } || (!uninstall && checked.previous_mod.as_deref() != Some(code)) {
@@ -124,5 +128,15 @@ mod tests {
             });
         }
         assert_eq!(games.iter().map(|g|g.result.as_str()).collect::<Vec<_>>(),vec!["installed","failed","failed"]);
+    }
+    #[test] fn rgss_folders_use_the_ruby_variant_and_drop_large_cached_registries(){
+        let ini=b"[Game]\nScripts=Data/Scripts.rvdata2\nTitle=Ace\n";
+        let registry=crate::rgss::bundle(ini,ini,&crate::rgss::tests::fixture());
+        let original=json!({"token":"rgss","title":"Ace","engine":"VX Ace","registry":registry});
+        let mut game=FolderGame::from_scan(&original).unwrap();assert_eq!(game.plan("custom JS"),"install");assert!(game.snapshot.as_ref().unwrap().registry.is_empty());
+        let mut result=original.clone();
+        game.apply("custom JS",false,|command,args|{if command=="applyFolder"{result["registry"]=args["registry"].clone();assert_eq!(args["plugin"],crate::rgss::CODE);}Ok(result.clone())});
+        assert_eq!(game.result,"installed");assert_eq!(game.plan("other JS"),"current");
+        game.apply("custom JS",true,|command,args|{if command=="applyFolder"{result["registry"]=args["registry"].clone();}Ok(result.clone())});assert_eq!(game.result,"removed");
     }
 }

@@ -1,4 +1,6 @@
 mod engine;
+mod rgss;
+mod rgss_archive;
 mod folders;
 use engine::{Inspection, Snapshot};
 use serde_json::{json, Value};
@@ -11,7 +13,7 @@ struct Session {
     last_operation: String, last_error: Option<String>, code: String, mod_name: String, result: Option<PathBuf>, result_name: String, action: String,
 }
 impl Default for Session {
-    fn default()->Self { Self {folders:Vec::new(),folder_mode:false,scan_warnings:Vec::new(),last_operation:String::new(),last_error:None,snapshot:None,source:None,folder_token:String::new(),code:engine::EMBEDDED_MOD.into(),mod_name:"Toolkit 1.4.1 · inclus".into(),result:None,result_name:String::new(),action:String::new()} }
+    fn default()->Self { Self {folders:Vec::new(),folder_mode:false,scan_warnings:Vec::new(),last_operation:String::new(),last_error:None,snapshot:None,source:None,folder_token:String::new(),code:engine::EMBEDDED_MOD.into(),mod_name:"Toolkit 1.6.0 · inclus".into(),result:None,result_name:String::new(),action:String::new()} }
 }
 #[derive(Default)] struct AppState { session: Mutex<Session>, busy: AtomicBool }
 struct Busy<'a>(&'a AtomicBool);
@@ -28,6 +30,7 @@ fn view(s:&Session)->Value { json!({"folderMode":s.folder_mode,"games":s.folders
 fn folder_snapshot(v:&Value)->Result<Snapshot,String> {
     let info=Inspection {title:v["title"].as_str().unwrap_or("Jeu RPG Maker").into(),engine:v["engine"].as_str().ok_or("Moteur absent.")?.into(),prefix:String::new(),source_name:v["name"].as_str().unwrap_or("Dossier").into(),kind:"folder".into(),status:String::new(),plugin_count:0,files:0,size:0,fingerprint:String::new(),recovery_needed:v["recoveryNeeded"].as_bool().unwrap_or(false)};
     let registry = v["registry"].as_str().ok_or("Liste de plugins absente.")?;
+    if rgss::legacy(&info.engine) { return rgss::inspect(registry.into(),info); }
     engine::patch_registry(registry, false)?;
     engine::inspect_text(v["registry"].as_str().ok_or("Liste de plugins absente.")?.into(),v["plugin"].as_str().map(str::to_string),info)
 }
@@ -127,13 +130,13 @@ async fn select_mod(app:AppHandle,request_id:String)->Result<Value,String>{job(a
     let code=engine::import_mod(&path);let _=std::fs::remove_file(path);s.code=code?;s.mod_name=data["name"].as_str().unwrap_or("ZIP du mod").into();clear_result(s);Ok(view(s))
 }).await}
 #[tauri::command]
-async fn reset_mod(app:AppHandle,request_id:String)->Result<Value,String>{job(app,request_id,|_,s|{s.code=engine::EMBEDDED_MOD.into();s.mod_name="Toolkit 1.4.1 · inclus".into();clear_result(s);Ok(view(s))}).await}
+async fn reset_mod(app:AppHandle,request_id:String)->Result<Value,String>{job(app,request_id,|_,s|{s.code=engine::EMBEDDED_MOD.into();s.mod_name="Toolkit 1.6.0 · inclus".into();clear_result(s);Ok(view(s))}).await}
 #[tauri::command]
 async fn apply_mod(app:AppHandle,uninstall:bool,request_id:String)->Result<Value,String>{job(app,request_id,move|app,s|{
     let snapshot=s.snapshot.clone().ok_or("Sélectionnez un jeu.")?;
     if snapshot.info.recovery_needed {return Err("Restaurez d’abord l’opération interrompue.".into());}
     if uninstall&&snapshot.info.status=="absent"{return Err("Le mod n’est pas installé dans ce jeu.".into());}
-    let patched=engine::patch_registry(&snapshot.registry,uninstall)?;
+    let patched=engine::patch_snapshot(&snapshot,uninstall)?;
     progress(app,"Copie de secours et préparation…",10);
     clear_result(s);
     if let Some(input)=&s.source {

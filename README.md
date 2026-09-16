@@ -1,6 +1,6 @@
 # RPGM Toolkit
 
-Mod intégré pour RPG Maker MV/MZ et installateur Android **Rust + Tauri 2**, version **1.5.0** (mod inclus **1.4.1**).
+Mod intégré pour RPG Maker XP, VX, VX Ace, MV et MZ et installateur Android **Rust + Tauri 2**, version **1.6.0** (mod inclus **1.6.0**).
 
 Recherche et édition de variables, alias anglais pour l’affichage, recherche et ajout d’objets, armes et armures. L’application Android détecte un jeu fourni en ZIP ou en dossier, installe le mod embarqué, permet sa mise à jour et sa désinstallation, avec sauvegardes et restauration.
 
@@ -8,6 +8,7 @@ Recherche et édition de variables, alias anglais pour l’affichage, recherche 
 
 - `plugin/src/` : sources du mod JavaScript compatible MV/MZ.
 - `plugin/RPGMToolkit.js` : mod compilé et prêt à installer.
+- `plugin/rgss/` : variante Ruby RGSS1/2/3 et tests de simulation.
 - `plugin/` : installateur Windows, démonstration et documentation d’utilisation.
 - `android/` : application React/TypeScript, moteur Rust et accès Android SAF en Kotlin.
 - `plugin/tests/` et `android/tests/` : tests du mod, installateur et régression du chargement MV/MZ.
@@ -42,14 +43,20 @@ Les essais du chargement MV/MZ utilisent des fixtures ; l’installation Android
 
 Licence MIT. Application indépendante de RPG Maker et de JoiPlay.
 
-Après compilation du frontend Android, `npm run test:mobile` à la racine vérifie les formats mobiles et l’accessibilité. Voir [les nouveautés 1.1.0](CHANGELOG.md).
+Après compilation du frontend Android, `npm run test:mobile` à la racine vérifie les formats mobiles et l’accessibilité. Voir [les versions](CHANGELOG.md).
 
-Le [guide Toolbox 1.4.1](plugin/TOOLBOX.md) décrit les sous-menus, outils de jeu, traductions en parallèle et la mise à jour.
+Le [guide Toolbox 1.6.0](plugin/TOOLBOX.md) décrit les sous-menus, outils de jeu, traductions en parallèle et la mise à jour.
 
 ## Bibliothèque de jeux Android
 
 Choisir **Dossiers de jeux** pour analyser un jeu ou un dossier parent. **Ajouter un dossier** ajoute une autre sélection Android à la liste, sans doublon. Les sous-dossiers sont parcourus jusqu’à 32 niveaux et 4 000 dossiers, avec 500 jeux maximum ; toute limite ou erreur de lecture est signalée.
 
-Chaque jeu indique l’action prévue : installation, mise à jour, réparation, déjà à jour ou incompatibilité. La compatibilité vérifiée concerne MV 1.6+ / MZ 1.x, les fichiers moteur requis, System.json, le registre des plugins et l’accès en écriture. Elle ne garantit pas l’absence de conflits avec tous les plugins tiers.
+Chaque jeu indique l’action prévue : installation, mise à jour, réparation, déjà à jour ou incompatibilité. La détection couvre XP, VX, VX Ace, MV 1.x et MZ 1.x. Les scripts RGSS, les registres JavaScript et les droits d’écriture sont contrôlés. Elle ne garantit pas l’absence de conflits avec tous les plugins tiers.
 
 Sélectionner les jeux puis **Installer / mettre à jour**. Les jeux identiques au mod choisi sont laissés intacts. Les fichiers sont revérifiés avant écriture ; les sauvegardes de secours et la restauration sont indépendantes pour chaque jeu. Une erreur n’arrête pas les autres jeux. La désinstallation groupée est également disponible. Les ZIP restent traités un par un.
+
+## Compatibilité 1.6
+
+Voir [le guide RGSS](plugin/rgss/README.md) pour XP/VX/VX Ace. Les fichiers `plugins.js` acceptent les littéraux JavaScript usuels : clés sans guillemets, chaînes simples, commentaires et virgules finales. Le fichier n’est jamais exécuté pendant son analyse. Les expressions calculées restent refusées.
+
+L’installateur PowerShell concerne MV/MZ. L’APK inclut les deux variantes et sélectionne automatiquement celle du moteur détecté. RPG Maker 2000/2003 ne sont pas pris en charge.

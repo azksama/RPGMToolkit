@@ -58,5 +58,12 @@ foreach ($engine in @('MV','MZ')) {
     [IO.File]::WriteAllText($list, 'var $plugins = [];', $encoding)
     Run-Installer $game @('-Yes')
     Assert-Test (@(Read-Plugins $list).Count -eq 1) "$engine empty plugin list installs correctly"
+    $literal = @'
+var $plugins = [{name:'ExistingPlugin',status:true,parameters:{value:'\\c[6]',nested:'{"key":"value"}',},},];
+'@
+    [IO.File]::WriteAllText($list, $literal, $encoding)
+    Run-Installer $game @('-Yes')
+    $literalPlugins = @(Read-Plugins $list)
+    Assert-Test ($literalPlugins.Count -eq 2 -and $literalPlugins[0].parameters.value -ceq '\c[6]' -and $literalPlugins[0].parameters.nested -ceq '{"key":"value"}') "$engine accepts JavaScript literals without altering escapes"
 }
 Write-Output "All $checks installer assertions passed in Windows PowerShell $($PSVersionTable.PSVersion)."

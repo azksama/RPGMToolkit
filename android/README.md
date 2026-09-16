@@ -1,16 +1,16 @@
-# RPGM Toolkit Android — 1.5.0
+# RPGM Toolkit Android — 1.6.0
 
-Application Android Rust + Tauri 2, interface React/TypeScript, accès aux fichiers par un plugin Kotlin Storage Access Framework. Le plugin RPG Maker MV/MZ `RPGMToolkit.js` est embarqué dans la bibliothèque Rust.
+Application Android Rust + Tauri 2, interface React/TypeScript, accès aux fichiers par un plugin Kotlin Storage Access Framework. Les modules MV/MZ `RPGMToolkit.js` et XP/VX/VX Ace `RPGMToolkit.rb` sont embarqués dans la bibliothèque Rust.
 
 ## Utilisation
 
 1. Installer l’APK et ouvrir **RPGM Toolkit**.
 2. Choisir **Archive ZIP** ou **Dossier du jeu**. Le sélecteur Android donne accès uniquement au fichier ou au dossier choisi.
-3. Vérifier le titre, le moteur MV/MZ et l’état du mod détectés.
+3. Vérifier le titre, le moteur et l’état du mod détectés.
 4. Choisir **Installer le mod**, ou **Désinstaller le mod** si le Toolkit est présent.
 5. Pour un ZIP, enregistrer le nouveau fichier, l’extraire, puis sélectionner le jeu extrait dans JoiPlay. Pour un dossier, le jeu est modifié directement et peut être rouvert.
 
-Le mod est déjà inclus. Le lien **Choisir un autre ZIP du mod** accepte une archive contenant exactement un `RPGMToolkit.js`, pour installer une autre version de ce même mod. Les autres fichiers de l’archive ne sont pas installés.
+Le mod est déjà inclus. Le lien **Choisir un autre ZIP du mod** accepte une archive contenant exactement un `RPGMToolkit.js`, pour installer une autre version de ce même mod. Cet import concerne MV/MZ ; RGSS utilise le module Ruby inclus.
 
 ## Sauvegardes et récupération
 
@@ -23,9 +23,11 @@ La désinstallation retire `RPGMToolkit.js` et son entrée dans la liste des plu
 ## Périmètre
 
 - Android 8.0+ (API 26), processeurs ARM64, ARMv7 et x86_64.
-- Jeux RPG Maker MV 1.6+ et MZ dans un dossier JavaScript standard : `js/plugins.js`, `js/rpg_core.js` ou `js/rmmz_core.js`. Racine, sous-dossier `www`, ou un dossier enveloppant acceptés. Le ZIP peut contenir une racine plus profonde.
-- Un seul jeu par sélection. `plugins.js` doit contenir le tableau JSON standard généré par RPG Maker.
-- Jeux ZIP de 8 Go maximum, 100 000 entrées et 16 Go de taille décompressée déclarée. ZIP du mod de 16 Mo maximum ; fichiers de configuration et plugin limités à 4 Mo. Les archives chiffrées, les chemins dangereux, les doublons et les liens sont refusés.
+- Jeux RPG Maker MV 1.x et MZ dans un dossier JavaScript standard : `js/plugins.js`, `js/rpg_core.js` ou `js/rmmz_core.js`. Racine, sous-dossier `www`, ou un dossier enveloppant acceptés. Le ZIP peut contenir une racine plus profonde.
+- Un jeu par ZIP ; plusieurs dossiers ou un dossier parent pour les bibliothèques. `plugins.js` accepte JSON et les littéraux JavaScript de données usuels, sans expressions exécutables.
+- XP/VX/VX Ace : `Game.ini` et scripts Marshal standards, seuls ou dans une archive RGSSAD v1/v3. La copie modifiée des scripts est écrite dans `RPGMToolkit/`, et `Game.ini` redirige vers cette copie. Les originaux restent intacts. La désinstallation restaure exactement le `Game.ini` original.
+- Les scripts RGSS sont limités à 16 Mo. Les runtimes propriétaires, scripts obfusqués ou formats modifiés peuvent être refusés. Voir [le guide RGSS](../plugin/rgss/README.md).
+- Jeux ZIP de 8 Go maximum, 100 000 entrées et 16 Go de taille décompressée déclarée. ZIP du mod de 16 Mo maximum ; fichiers de configuration et plugin limités à 4 Mo. Les ZIP protégés par mot de passe, les chemins dangereux, les doublons et les liens sont refusés.
 - Les APK de jeux et les répertoires privés d’autres applications ne sont pas modifiés. Choisir un dossier partagé accessible, par exemple `Documents/Jeux`. La compatibilité du jeu lui-même avec JoiPlay reste nécessaire.
 - L’installateur traite les fichiers localement. La traduction des noms dans le mod en jeu utilise un service en ligne uniquement à la demande ; les alias n’altèrent pas les noms internes du jeu.
 
@@ -69,4 +71,4 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib --locked
 
 Application indépendante de RPG Maker et de JoiPlay. Voir le rapport de validation livré pour distinguer les tests automatisés, les essais sur émulateur et la validation sur un jeu réel.
 
-La sélection de dossiers accepte une bibliothèque contenant plusieurs jeux et des ajouts successifs de dossiers. Le mod embarqué reste en version 1.4.1. Voir le guide bibliothèque du README principal.
+La sélection de dossiers accepte une bibliothèque contenant plusieurs jeux et des ajouts successifs de dossiers. Le mod embarqué reste en version 1.6.0. Voir le guide bibliothèque du README principal.

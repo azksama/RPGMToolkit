@@ -28,12 +28,23 @@ pub fn fingerprint(registry: &str, plugin: Option<&str>) -> String {
 }
 fn parse_registry(text: &str) -> Result<(String, Vec<Value>, String), String> {
     if text.len() as u64 > MAX_TEXT { return Err("La liste de plugins dépasse 4 Mo.".into()); }
-    let re = Regex::new(r"(?s)\A(.*?\b(?:var|let|const)\s+\$plugins\s*=\s*)(\[.*\])(\s*;?\s*)\z").unwrap();
+    let re = Regex::new(r"(?s)\A(.*?\b(?:var|let|const)\s+\$plugins\s*=\s*)(\[.*\])((?:\s|;|//[^\r\n]*(?:\r?\n|\z)|/\*.*?\*/)*)\z").unwrap();
     let captures = re.captures(text).ok_or("Format de plugins.js non standard. Aucun changement effectué.")?;
-    let entries: Vec<Value> = serde_json::from_str(&captures[2]).map_err(|_| "La liste de plugins doit être un tableau JSON standard.")?;
+    literal_depth(&captures[2])?;
+    let entries: Vec<Value> = json5::from_str(&captures[2]).map_err(|e| format!("Liste de plugins illisible : {e}"))?;
     if entries.iter().any(|entry| entry.get("name").and_then(Value::as_str).is_none()) { return Err("Une entrée de plugins.js est invalide.".into()); }
     if entries.iter().filter(|e| e["name"].as_str().is_some_and(|n| n.eq_ignore_ascii_case("RPGMToolkit"))).count() > 1 { return Err("Plusieurs entrées RPGMToolkit existent. Corrigez le doublon avant de continuer.".into()); }
     Ok((captures[1].into(), entries, captures[3].into()))
+}
+fn literal_depth(s:&str)->Result<(),String>{
+    let b=s.as_bytes();let mut i=0;let mut depth=0usize;let mut quote=0;
+    while i<b.len(){let c=b[i];if quote!=0{if c==b'\\'{i+=1}else if c==quote{quote=0}}
+        else if c==b'\''||c==b'"'{quote=c}
+        else if c==b'/'&&b.get(i+1)==Some(&b'/'){i+=2;while i<b.len()&&b[i]!=b'\n'{i+=1}}
+        else if c==b'/'&&b.get(i+1)==Some(&b'*'){i+=2;while i+1<b.len()&&!(b[i]==b'*'&&b[i+1]==b'/'){i+=1}i+=1;}
+        else if c==b'['||c==b'{'{depth+=1;if depth>64{return Err("Paramètres de plugins trop imbriqués.".into())}}
+        else if c==b']'||c==b'}'{depth=depth.saturating_sub(1)}i+=1;
+    }Ok(())
 }
 pub fn inspect_text(registry: String, previous_mod: Option<String>, mut info: Inspection) -> Result<Snapshot, String> {
     let (_, entries, _) = parse_registry(&registry)?;
@@ -57,6 +68,9 @@ pub fn patch_registry(registry: &str, uninstall: bool) -> Result<String, String>
         entries.push(plugin);
     }
     Ok(format!("{}{}{}", prefix, serde_json::to_string_pretty(&entries).map_err(|e|e.to_string())?, suffix))
+}
+pub fn patch_snapshot(snapshot:&Snapshot,uninstall:bool)->Result<String,String>{
+    if crate::rgss::legacy(&snapshot.info.engine) {crate::rgss::patch(&snapshot.registry,uninstall)} else {patch_registry(&snapshot.registry,uninstall)}
 }
 fn valid_name(name: &str) -> bool {
     !name.is_empty() && !name.starts_with('/') && !name.contains(['\\', '\0', ':']) &&
@@ -86,6 +100,57 @@ fn read_text(zip: &mut ZipArchive<File>, name: &str) -> Result<Option<String>, S
         Err(zip::result::ZipError::FileNotFound) => Ok(None), Err(e) => Err(e.to_string()),
     }
 }
+fn zip_bytes(zip:&mut ZipArchive<File>,name:&str)->Result<Vec<u8>,String>{
+    let mut file=zip.by_name(name).map_err(|_|format!("Fichier absent : {name}"))?;
+    if file.size()>crate::rgss::LIMIT as u64{return Err(format!("{name} dépasse 16 Mo."))}
+    let mut data=Vec::new();file.read_to_end(&mut data).map_err(|e|e.to_string())?;Ok(data)
+}
+fn inspect_rgss_zip(zip:&mut ZipArchive<File>,names:&HashSet<String>,prefix:&str,source:&str,path:&Path)->Result<Snapshot,String>{
+    use crate::rgss;
+    let ini=zip_bytes(zip,&format!("{prefix}Game.ini"))?;
+    let original_path=format!("{prefix}RPGMToolkit/original-game.ini");
+    let original=if names.contains(&original_path){zip_bytes(zip,&original_path)?}else{ini.clone()};
+    let (script_path,engine)=rgss::script_path(&ini)?;
+    if rgss::script_path(&original)?.0.starts_with("RPGMToolkit/"){return Err("Copie originale de Game.ini absente.".into())}
+    let ext=match engine.as_str(){"XP"=>".rgssad","VX"=>".rgss2a",_=>".rgss3a"};
+    let archives:Vec<_>=names.iter().filter(|n|n.strip_prefix(prefix).is_some_and(|s|!s.contains('/')&&s.to_lowercase().ends_with(ext))).collect();
+    if archives.len()>1{return Err("Plusieurs archives RGSS : moteur ambigu.".into())}
+    let scripts=if !script_path.starts_with("RPGMToolkit/")&&!archives.is_empty(){
+        let mut archive=zip.by_name(archives[0]).map_err(|e|e.to_string())?;
+        crate::rgss_archive::extract(&mut archive,&script_path)?
+    }else{
+        let full=format!("{prefix}{script_path}");
+        let actual=names.iter().find(|n|n.eq_ignore_ascii_case(&full)).ok_or("Scripts RGSS absents.")?;
+        zip_bytes(zip,actual)?
+    };
+    if !names.contains(&original_path)&&names.iter().any(|n|n.starts_with(&format!("{prefix}RPGMToolkit/"))&&!n.ends_with('/')){return Err("Dossier RPGMToolkit déjà utilisé.".into())}
+    let title=String::from_utf8_lossy(&original).lines().find_map(|l|l.split_once('=').filter(|(k,_)|k.trim().eq_ignore_ascii_case("Title")).map(|(_,v)|v.trim().to_string())).unwrap_or_else(||source.into());
+    let info=Inspection{title,engine,prefix:prefix.into(),source_name:source.into(),kind:"zip".into(),status:String::new(),plugin_count:0,files:zip.len(),size:path.metadata().map_err(|e|e.to_string())?.len(),fingerprint:String::new(),recovery_needed:false};
+    rgss::inspect(rgss::bundle(&ini,&original,&scripts),info)
+}
+fn transform_rgss_zip(input:&Path,output:&Path,snapshot:&Snapshot,uninstall:bool,progress:impl Fn(usize,usize))->Result<(),String>{
+    use crate::rgss;
+    let result=(||{
+        let patched=rgss::patch(&snapshot.registry,uninstall)?;
+        let (ini,original,scripts)=rgss::fields(&patched)?;
+        let prefix=&snapshot.info.prefix;let ini_path=format!("{prefix}Game.ini");
+        let script_path=format!("{prefix}{}",rgss::target(&original)?);let original_path=format!("{prefix}RPGMToolkit/original-game.ini");
+        let mut source=open_zip(input)?;let count=source.len();let mut writer=ZipWriter::new(File::create(output).map_err(|e|e.to_string())?);
+        for i in 0..count{let file=source.by_index(i).map_err(|e|e.to_string())?;
+            if file.name()!=ini_path&&file.name()!=script_path&&file.name()!=original_path&&!(uninstall&&file.name()==format!("{prefix}RPGMToolkit/")){writer.raw_copy_file(file).map_err(|e|e.to_string())?;}
+            if i%50==0||i+1==count{progress(i+1,count)}
+        }
+        let options=SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated).unix_permissions(0o644);
+        let mut write=|name:String,data:&[u8]|->Result<(),String>{writer.start_file(name,options).map_err(|e|e.to_string())?;writer.write_all(data).map_err(|e|e.to_string())};
+        let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e|e.to_string())?.as_nanos();
+        write(format!("{prefix}.rpgm-toolkit-backups/{stamp}/state.json"),snapshot.registry.as_bytes())?;
+        write(ini_path,&ini)?;
+        if !uninstall{write(script_path,&scripts)?;write(original_path,&original)?;}
+        writer.finish().map_err(|e|e.to_string())?.sync_all().map_err(|e|e.to_string())?;
+        let checked=inspect_zip(output,&snapshot.info.source_name)?;
+        if checked.info.status!=if uninstall{"absent"}else{"installed"}||(!uninstall&&checked.previous_mod.as_deref()!=Some(rgss::CODE)){return Err("Vérification du ZIP RGSS échouée.".into())}Ok(())
+    })();if result.is_err(){let _=std::fs::remove_file(output);}result
+}
 pub fn inspect_zip(path: &Path, source_name: &str) -> Result<Snapshot, String> {
     eprintln!("RPGM: checking ZIP entries");
     let mut zip = open_zip(path)?;
@@ -93,14 +158,20 @@ pub fn inspect_zip(path: &Path, source_name: &str) -> Result<Snapshot, String> {
     let names: HashSet<String> = zip.file_names().map(str::to_string).collect();
     let mut candidates = Vec::new();
     for name in &names {
+        if name.split('/').any(|p| p == ".rpgm-toolkit-backups" || p == "RPGMToolkit") { continue; }
+        if let Some(prefix) = name.strip_suffix("Game.ini") {
+            if !names.contains(&format!("{prefix}js/plugins.js")) { candidates.push((prefix.to_string(), "RGSS")); }
+        }
         if let Some(prefix) = name.strip_suffix("js/plugins.js") {
             if names.contains(&format!("{prefix}js/rmmz_core.js")) { candidates.push((prefix.to_string(), "MZ")); }
             else if names.contains(&format!("{prefix}js/rpg_core.js")) { candidates.push((prefix.to_string(), "MV")); }
         }
     }
-    if candidates.is_empty() { return Err("Aucun jeu MV/MZ détecté. Le ZIP doit contenir js/plugins.js et le moteur rpg_core.js ou rmmz_core.js.".into()); }
+    if candidates.is_empty() { return Err("Aucun jeu XP/VX/VX Ace/MV/MZ détecté dans le ZIP.".into()); }
     if candidates.len() != 1 { return Err("Ce ZIP contient plusieurs jeux. Fournissez un ZIP contenant un seul jeu.".into()); }
     let (prefix, engine) = candidates.remove(0);
+    if names.contains(&format!("{prefix}.rpgm-toolkit-rgss-pending.json")) { return Err("Restauration RGSS requise en mode Dossier.".into()); }
+    if engine == "RGSS" { return inspect_rgss_zip(&mut zip,&names,&prefix,source_name,path); }
     if names.contains(&format!("{prefix}.rpgm-toolkit-pending.json")) { return Err("Ce jeu contient une opération de dossier interrompue. Restaurez-la d’abord en mode Dossier.".into()); }
     let title = read_text(&mut zip, &format!("{prefix}data/System.json"))?.and_then(|s|serde_json::from_str::<Value>(s.trim_start_matches('\u{feff}')).ok()).and_then(|v|v["gameTitle"].as_str().map(str::to_string)).filter(|s|!s.is_empty()).unwrap_or_else(||source_name.into());
     eprintln!("RPGM: reading ZIP registry");
@@ -124,6 +195,7 @@ pub fn import_mod(path: &Path) -> Result<String, String> {
 pub fn transform_zip(input: &Path, output: &Path, snapshot: &Snapshot, code: &str, uninstall: bool, progress: impl Fn(usize,usize)) -> Result<(), String> {
     let current = inspect_zip(input, &snapshot.info.source_name)?;
     if current.info.fingerprint != snapshot.info.fingerprint { return Err("Le jeu a changé depuis son analyse. Sélectionnez-le à nouveau.".into()); }
+    if crate::rgss::legacy(&snapshot.info.engine) { return transform_rgss_zip(input,output,snapshot,uninstall,progress); }
     let registry = patch_registry(&snapshot.registry, uninstall)?;
     let prefix = &snapshot.info.prefix; let registry_path = format!("{prefix}js/plugins.js"); let mod_path = format!("{prefix}{MOD_PATH}");
     let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e|e.to_string())?.as_nanos();
@@ -175,4 +247,35 @@ mod tests {
     #[test] fn parser_refuses_executable_registry(){assert!(patch_registry("var $plugins = evil();",false).is_err());assert!(patch_registry("var $plugins = [{\"name\":\"RPGMToolkit\"},{\"name\":\"RPGMToolkit\"}];",false).is_err());}
     #[test] fn installation_is_idempotent(){let a=patch_registry("var $plugins = [];",false).unwrap();let b=patch_registry(&a,false).unwrap();assert_eq!(a,b);assert_eq!(parse_registry(&a).unwrap().1.len(),1);}
     #[test] fn fingerprint_detects_plugin_changes(){assert_ne!(fingerprint("a",None),fingerprint("a",Some("")));assert_ne!(fingerprint("a",Some("1")),fingerprint("a",Some("2")));}
+    #[test] fn javascript_literal_registry_preserves_user_parameters(){
+        let input=r#"// Generated by RPG Maker.
+var $plugins = [
+ {name: "MPP_Patch", status: true, description: "【2019/11/30】不具合修正プラグイン", parameters: {"Patch19 enabled?": "true",},},
+ {name: 'MadeWithMv', status: true, description: 'A "Made with MV" screen', parameters: {},},
+ {name: 'MenuCommonEvent', status: true, parameters: {
+ コモンイベント情報: '["{\\"SceneName\\":\\"Scene_Menu\\"}"]',
+ command: 'this.standardPadding() * 4', color: '\\c[6]', comment: '/* not a comment */',
+ },}, // comment
+]; // end
+"#;
+        let before=parse_registry(input).unwrap().1;let installed=patch_registry(input,false).unwrap();let removed=patch_registry(&installed,true).unwrap();
+        assert_eq!(parse_registry(&removed).unwrap().1,before);assert_eq!(parse_registry(&installed).unwrap().1.len(),4);
+        assert_eq!(patch_registry(&installed,false).unwrap(),installed);
+    }
+    #[test] fn executable_and_deep_literals_are_rejected(){
+        for s in ["var $plugins = [{name: call()}];","var $plugins = [{name: 'x', get status(){return true}}];","var $plugins = [...other];"]{assert!(patch_registry(s,false).is_err())}
+        assert!(patch_registry(&format!("var $plugins = {}{};","[".repeat(1000),"]".repeat(1000)),false).is_err());
+    }
+    #[test] fn rgss_zip_roundtrip_for_all_three_engines(){
+        for ext in ["rxdata","rvdata","rvdata2"]{
+            let dir=tempfile::tempdir().unwrap();let input=dir.path().join("original.zip");let mut z=ZipWriter::new(File::create(&input).unwrap());let opts=SimpleFileOptions::default();
+            let ini=format!("[Game]\r\nScripts=Data\\Scripts.{ext}\r\nTitle=Legacy\r\n");
+            z.start_file("Game/Game.ini",opts).unwrap();z.write_all(ini.as_bytes()).unwrap();
+            let scripts=crate::rgss::tests::fixture();z.start_file(format!("Game/Data/Scripts.{ext}"),opts).unwrap();z.write_all(&scripts).unwrap();
+            z.start_file("Game/Save01.rvdata2",opts).unwrap();z.write_all(b"save data").unwrap();z.finish().unwrap();
+            let original=std::fs::read(&input).unwrap();let before=inspect_zip(&input,"original.zip").unwrap();let installed=dir.path().join("installed.zip");
+            transform_zip(&input,&installed,&before,EMBEDDED_MOD,false,|_,_|{}).unwrap();let snapshot=inspect_zip(&installed,"installed.zip").unwrap();assert_eq!(snapshot.info.status,"installed");
+            let removed=dir.path().join("removed.zip");transform_zip(&installed,&removed,&snapshot,EMBEDDED_MOD,true,|_,_|{}).unwrap();let mut checked=open_zip(&removed).unwrap();assert_eq!(zip_bytes(&mut checked,"Game/Game.ini").unwrap(),ini.as_bytes());assert_eq!(zip_bytes(&mut checked,&format!("Game/Data/Scripts.{ext}")).unwrap(),scripts);assert_eq!(zip_bytes(&mut checked,"Game/Save01.rvdata2").unwrap(),b"save data");assert_eq!(std::fs::read(input).unwrap(),original);
+        }
+    }
 }

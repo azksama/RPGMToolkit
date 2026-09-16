@@ -7,3 +7,5 @@ gradlew text eol=lf
 plugin/src/* text eol=lf
 plugin/RPGMToolkit.js text eol=lf
 android/src-tauri/resources/RPGMToolkit.js text eol=lf
+
+*.rb text eol=lf

@@ -1,5 +1,14 @@
 # Versions
 
+## 1.6.0 — Compatibilité des moteurs
+
+- Détection et installation XP, VX, VX Ace, MV 1.x et MZ 1.x, en ZIP ou en bibliothèque de dossiers Android.
+- Module Ruby RGSS : éditeurs, sélection multiple, favoris, valeurs figées, outils de combat, téléportation, paramètres et alias anglais persistants.
+- Scripts RGSS standards et archives RGSSAD v1/v3 ; installation réversible sans modifier les archives originales.
+- Lecture de `plugins.js` avec clés non citées, chaînes simples, commentaires et virgules finales, sans exécution du fichier.
+- Interface MV/MZ conservée depuis la 1.5.
+- RPG Maker 2000/2003 exclus. Compatibilité avec les moteurs standards ; les jeux personnalisés et le tactile JoiPlay demandent une validation sur appareil.
+
 ## 1.5.0 — Installation de bibliothèques Android
 
 - Ajout de plusieurs dossiers et recherche récursive des jeux MV/MZ.
