@@ -29,6 +29,7 @@ function allowed() {
 function mobileLayout() { return g.matchMedia && g.matchMedia('(max-width: 800px), (max-width: 950px) and (max-height: 500px)').matches; }
 function touchInput() { return g.matchMedia && g.matchMedia('(pointer: coarse)').matches; }
 function syncViewport() {
+    positionLauncher();
     if (!opened || !root) return;
     var v = g.visualViewport || { height:g.innerHeight, width:g.innerWidth, offsetTop:0, offsetLeft:0 };
     root.style.height = v.height + 'px'; root.style.width = v.width + 'px';
@@ -49,6 +50,7 @@ function buildRoot() {
     $('[data-action="clear-selection"]').setAttribute('aria-label', 'Effacer la sélection');
     $('[data-action="prev"]').setAttribute('aria-label', 'Page précédente');
     $('[data-action="next"]').setAttribute('aria-label', 'Page suivante');
+    var recall=document.createElement('button');recall.type='button';recall.className='rt-bottom-close';recall.textContent='✕';recall.setAttribute('aria-label','Fermer le Toolkit');recall.hidden=true;recall.addEventListener('click',function(event){event.stopPropagation();closeToolkit();});root.appendChild(recall);
     document.body.appendChild(root);
     installToolboxUI();
     installToolkitScroll();
@@ -383,7 +385,7 @@ function openToolkit() {
     if (!allowed()) return false;
     try {
         initializeRuntime();
-        if (!gameTools) gameTools = createToolkitTools(g);
+        if (!gameTools) gameTools = createToolkitTools(g, runtime);
         runtime.refresh(); selected = null; checked = {}; 
         buildRoot(); previousFocus = document.activeElement; openScene = g.SceneManager._scene;
         openVariables = g.$gameVariables; opened = true; root.hidden = false; if (launch) launch.hidden = true;
@@ -406,7 +408,7 @@ function closeToolkit() {
     if (previousFocus && document.contains(previousFocus)) previousFocus.focus();
 }
 function toggleToolkit() { return opened ? closeToolkit() : openToolkit(); }
-g.RPGMToolkit = { version: '1.6.0', open: openToolkit, close: closeToolkit, toggle: toggleToolkit, isOpen: function() { return opened; } };
+g.RPGMToolkit = { version: '1.7.0', open: openToolkit, close: closeToolkit, toggle: toggleToolkit, isOpen: function() { return opened; } };
 var heldCloseKey = null;
 g.addEventListener('keydown', function(event) {
     var key = event.key || ({ 117: 'F6', 118: 'F7', 121: 'F10', 27: 'Escape' }[event.keyCode]);
@@ -419,6 +421,7 @@ g.addEventListener('keydown', function(event) {
     if ((event.ctrlKey || event.metaKey) && (key === 'f' || key === 'F')) { event.preventDefault(); event.stopImmediatePropagation(); if (!modalMode && $('#rt-search')) $('#rt-search').focus(); return; }
     if (key === 'Tab') {
         var focusables = Array.prototype.slice.call((modalMode ? $('.rt-modal') : $('.rt-panel')).querySelectorAll('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href],[role=scrollbar]')).filter(function(el) { return el.offsetWidth || el.offsetHeight; });
+        var recall=$('.rt-bottom-close');if(recall&&!recall.hidden)focusables.push(recall);
         if (!focusables.length) return;
         var first = focusables[0], last = focusables[focusables.length - 1];
         if (event.shiftKey && (document.activeElement === first || focusables.indexOf(document.activeElement) < 0)) { event.preventDefault(); last.focus(); }
@@ -443,7 +446,7 @@ var originalUpdateScene = g.SceneManager.updateScene;
 g.SceneManager.updateScene = function() {
     if (!runtime && allowed()) initializeRuntime();
     if (opened && (this._scene !== openScene || g.$gameVariables !== openVariables || this.isSceneChanging())) closeToolkit();
-    if (launch) { var hidden = opened || (runtime && !runtime.prefs.settings.showButton) || !allowed(); if (launch.hidden !== hidden) launch.hidden = hidden; }
+    if (launch) { var hidden = opened || (runtime && !runtime.prefs.settings.showButton) || !allowed(); if (launch.hidden !== hidden) { launch.hidden = hidden; if(!hidden)positionLauncher(); } }
     if (gameTools) gameTools.tick();
     if (runtime) runtime.enforceFrozen();
     if (!opened) { var result = originalUpdateScene.apply(this, arguments); if (gameTools) gameTools.tick(); if (runtime) runtime.enforceFrozen(); return result; }

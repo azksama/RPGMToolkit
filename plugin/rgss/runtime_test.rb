@@ -161,7 +161,40 @@ Dir.mktmpdir('rgss-test') do |dir|
     ui.instance_variable_get(:@buttons).each { |b| check(b[0]>=0&&b[1]>=0&&b[0]+b[2]<=WIDTH&&b[1]+b[3]<=HEIGHT,'clipped button '+mode.to_s) }
   end
   ui.mode(:editors); ui.edit([r]); ui.draw; ui.back; check(ui.instance_variable_get(:@mode)==:editors&&!ui.instance_variable_get(:@done),'modal close')
-  ui.prompt('X,Y','0,0') {}; ui.draw; check(ui.instance_variable_get(:@max_scroll)>=0,'modal scrolling')
+  RPGMToolkit.prefs['bottom_close']=true
+  ui.prompt('X,Y','0,0') {}; ui.draw
+  ui.instance_variable_get(:@buttons).each { |b| check(b[0]>=0&&b[1]>=0&&b[0]+b[2]<=WIDTH&&b[1]+b[3]<=HEIGHT,'close recall bounds') }
+  ui.back; ui.mode(:home); ui.draw; RPGMToolkit.prefs['bottom_close']=false
+  check(ui.instance_variable_get(:@max_scroll)>=0,'modal scrolling')
+  safe_map=Struct.new(:map_id,:width,:height,:events,:walls).new(1,5,5,{},[[2,2]])
+  def safe_map.passable?(x,y,*args); !walls.include?([x,y]); end
+  target=RPGMToolkit.safe_destination(safe_map,2,2); check(target!=[2,2],'safe landing avoids wall')
+  safe_map.walls=(0...5).to_a.product((0...5).to_a)-[[2,2]]
+  begin
+    RPGMToolkit.safe_destination(safe_map,2,2); raise 'isolated cell accepted'
+  rescue RuntimeError => e
+    check(e.message.include?('No safe position'),'isolated tile refused')
+  end
+  safe_map.walls=[]
+  safe_map.events[1]=Struct.new(:x,:y).new(2,2)
+  check(RPGMToolkit.safe_destination(safe_map,2,2)!=[2,2],'event collision')
+  safe_map.events={}
+  $game_map=safe_map
+  $game_temp=Struct.new(:player_transferring,:player_new_map_id,:player_new_x,:player_new_y,:player_new_direction).new(false)
+  $game_player=Struct.new(:through,:x,:y,:direction).new(false,1,1,6)
+  if ENGINE>1
+    def $game_player.reserve_transfer(id,x,y,d); $game_temp.player_transferring=true; $game_temp.player_new_x=x; $game_temp.player_new_y=y; end
+    def $game_player.transfer?; $game_temp.player_transferring; end
+  end
+  RPGMToolkit.save_place('Home')
+  RPGMToolkit.transfer(1,3,3)
+  check(RPGMToolkit.prefs['last_location'].empty?,'history waits for transfer')
+  RPGMToolkit.finish_travel; check(RPGMToolkit.prefs['last_location'].empty?,'pending transfer not complete')
+  $game_player.x=3; $game_player.y=3; $game_temp.player_transferring=false; RPGMToolkit.finish_travel
+  check(RPGMToolkit.prefs['last_location'][1,4]==[1,1,1,6],'origin saved after arrival')
+  RPGMToolkit.instance_variable_set(:@prefs,nil)
+  check(RPGMToolkit.prefs['places'][0][0]=='Home','saved location persists')
+  check(RPGMToolkit.prefs['last_location'][2]==1,'last location persists')
   $game_variables=Game_Variables.new; RPGMToolkit.tick; check(RPGMToolkit.frozen.empty?&&!RPGMToolkit.god,'new game isolation')
   puts "RGSS#{ENGINE}: runtime, persistence, controls and geometry passed"
  end

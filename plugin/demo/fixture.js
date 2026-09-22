@@ -18,7 +18,7 @@
     g.$dataMap = { events:[null,{id:1,name:'Coffre du temple'},{id:2,name:'Porte secrète'}] };
     g.$gameMap = { mapId:function(){return 7;},requestRefresh:function(){g._refreshes++;},isEventRunning:function(){return false;} };
     g._refreshes = 0;
-    g.$gamePlayer = {x:12,y:8,refresh:function(){},isTransferring:function(){return false;}};
+    g.$gamePlayer = {x:12,y:8,refresh:function(){},isTransferring:function(){return !!g._transferPending;}};
     g.$gameTemp = {clearDestination:function(){g._destination = false;}};
     g.$gameMessage = {isBusy:function(){return false;}};
     g.$gameSystem = {isSaveEnabled:function(){return true;}};
@@ -43,12 +43,13 @@
     Actor.prototype.param=function(i){return (i===0?this.mhp:i===1?this.mmp:30)+(this._paramPlus[i]||0);};Actor.prototype.addParam=function(i,n){this._paramPlus[i]+=n;};
     g.Game_BattlerBase=Actor;g.Game_Battler=Actor;
     g.$gameParty._actors=[1,2];g.$gameParty.allMembers=function(){return this._actors.map(function(id){return g.$gameActors.actor(id);});};
-    g.$gamePlayer.isThrough=function(){return false;};g.$gamePlayer.reserveTransfer=function(id,x,y,direction){g._transfer=[id,x,y,direction];};
+    g.$gameMap.isPassable=function(x,y){return x>0&&y>0&&x<29&&y<19;};g.$gameMap.events=function(){return [];};g.$gamePlayer.direction=function(){return 2;};
+    g.$gamePlayer.isThrough=function(){return false;};g.$gamePlayer.reserveTransfer=function(id,x,y,direction){g._transfer=[id,x,y,direction];g._transferPending=true;};
     g.$dataMap.width=30;g.$dataMap.height=20;g.$dataMapInfos=[];g.$dataMapInfos[7]={id:7,name:'Temple'};g.$dataMapInfos[8]={id:8,name:'Village'};
     var iconCanvas=document.createElement('canvas');iconCanvas.width=32;iconCanvas.height=32;var iconContext=iconCanvas.getContext('2d');iconContext.fillStyle='#91b8ee';iconContext.fillRect(6,8,20,20);iconContext.fillStyle='#eff4ff';iconContext.fillRect(12,3,8,5);
     g.ImageManager={loadSystem:function(){return {canvas:iconCanvas,addLoadListener:function(fn){fn();}};}};
     g.Scene_Map=function(){};g.Scene_Map.prototype.isBusy=function(){return false;};g.Scene_Save=function(){};
-    g._ticks=0;g._gameKeys=0;g.SceneManager={_scene:new g.Scene_Map(),_sceneStarted:true,isCurrentSceneStarted:function(){return this._scene && this._sceneStarted;},isSceneChanging:function(){return !!this._nextScene;},updateScene:function(){g._ticks++;},push:function(scene){this._nextScene=new scene();}};
+    g._ticks=0;g._gameKeys=0;g.SceneManager={_scene:new g.Scene_Map(),_sceneStarted:true,isCurrentSceneStarted:function(){return this._scene && this._sceneStarted;},isSceneChanging:function(){return !!this._nextScene;},updateScene:function(){g._ticks++;if(g._transferPending){g.$gamePlayer.x=g._transfer[1];g.$gamePlayer.y=g._transfer[2];g._transferPending=false;}},push:function(scene){this._nextScene=new scene();}};
     g.Game_Interpreter=function(){};g.Game_Interpreter.prototype.pluginCommand=function(){};g.Game_Interpreter.prototype.setWaitMode=function(mode){this._waitMode=mode;};g.Game_Interpreter.prototype.updateWaitMode=function(){return false;};
     document.addEventListener('keydown',function(){g._gameKeys++;});
     setInterval(function(){g.SceneManager.updateScene();document.getElementById('ticks').textContent=g._ticks;},16);

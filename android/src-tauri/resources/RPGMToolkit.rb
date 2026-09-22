@@ -1,7 +1,7 @@
-# RPGM Toolkit 1.6.0 - RGSS1 / RGSS2 / RGSS3
+# RPGM Toolkit 1.7.0 - RGSS1 / RGSS2 / RGSS3
 # SPDX-License-Identifier: MIT
 module RPGMToolkit
-  VERSION = '1.6.0'
+  VERSION = '1.7.0'
   FILE = 'RPGMToolkit-settings.dat'
   DICTIONARY = 'RPGMToolkit-translations.tsv'
   CATEGORIES = [:variables, :switches, :self_switches, :items, :weapons, :armors, :actors, :skills, :states, :favorites]
@@ -26,7 +26,10 @@ module RPGMToolkit
     :rail=>['Barre de defilement','Scrollbar'], :page=>['Lignes par page','Rows per page'],
     :launch=>['Bouton Toolbox','Toolbox button'], :heal=>['Tout restaurer','Restore all'],
     :enemies=>['Ennemis','Enemies'], :team=>['Equipe','Party'], :start=>['Traduire','Translate'],
-    :stop=>['Arreter','Stop'], :source=>['Langue source','Source language']
+    :stop=>['Arreter','Stop'], :source=>['Langue source','Source language'], :safe_teleport=>['Safe Teleport','Safe Teleport'],
+    :save_place=>['Enregistrer ici','Save current location'], :last_location=>['Dernier emplacement','Last location'],
+    :places=>['Emplacements','Locations'], :button_x=>['Position horizontale','Horizontal position'],
+    :button_y=>['Position verticale','Vertical position'], :bottom_close=>['Fermeture en bas a gauche','Close button at bottom left']
   }
   DESCRIPTIONS = {
     :editors=>['Variables, objets, armes, armures','Variables, items, weapons, armor'],
@@ -46,7 +49,7 @@ module RPGMToolkit
     end
     def prefs
       return @prefs if @prefs
-      @prefs = {'language'=>'fr','english'=>false,'font'=>18,'rail'=>24,'rows'=>60,'launch'=>true,'aliases'=>{},'favorites'=>{},'source'=>'ja'}
+      @prefs = {'language'=>'fr','english'=>false,'font'=>18,'rail'=>24,'rows'=>60,'launch'=>true,'aliases'=>{},'favorites'=>{},'source'=>'ja','safe_teleport'=>true,'button_x'=>0,'button_y'=>0,'bottom_close'=>false,'places'=>[],'last_location'=>[]}
       begin
         saved = File.open(FILE,'rb') { |f| Marshal.load(f) } if File.exist?(FILE)
         if saved.is_a?(Hash)
@@ -54,6 +57,9 @@ module RPGMToolkit
         end
       rescue StandardError
       end
+      @prefs['places']=@prefs['places'].select { |p| valid_place?(p) }[0,100]
+      @prefs['last_location']=[] unless valid_place?(@prefs['last_location'])
+      ['button_x','button_y'].each { |k| @prefs[k]=[[@prefs[k].to_i,0].max,100].min }
       @prefs['font'] = [14,18,22].include?(@prefs['font']) ? @prefs['font'] : 18
       @prefs['rail'] = [18,24,32].include?(@prefs['rail']) ? @prefs['rail'] : 24
       @prefs['rows'] = [20,40,60,80].include?(@prefs['rows']) ? @prefs['rows'] : 60
@@ -203,8 +209,9 @@ module RPGMToolkit
       return if @busy
       hooks
       if @session != (defined?($game_variables) && $game_variables)
-        @session=$game_variables; @frozen={}; @journal=[]; @god=false; @noclip=false; @player=nil
+        @session=$game_variables; @frozen={}; @journal=[]; @god=false; @noclip=false; @player=nil; @pending_travel=nil
       end
+      finish_travel
       unless available?
         @launcher.visible=false if @launcher
         return
@@ -222,11 +229,14 @@ module RPGMToolkit
       @launcher.z=999998
       unless @launcher.bitmap
         @launcher.bitmap=Bitmap.new(100,30); @launcher.bitmap.fill_rect(0,0,100,30,Color.new(45,53,67,230)); @launcher.bitmap.font.size=18; @launcher.bitmap.draw_text(0,0,100,30,'Toolbox',1)
-        @launcher.x=6; @launcher.y=6
       end
+      width=Graphics.respond_to?(:width) ? Graphics.width : 640
+      height=Graphics.respond_to?(:height) ? Graphics.height : 480
+      @launcher.x=6+[width-112,0].max*prefs['button_x']/100
+      @launcher.y=6+[height-42,0].max*prefs['button_y']/100
       @launcher.visible=prefs['launch']
       hot=Input.const_defined?('F6') && Input.trigger?(Input.const_get('F6'))
-      click=mouse_trigger? && mouse_x<106 && mouse_y<36 && prefs['launch']
+      click=mouse_trigger? && mouse_x>=@launcher.x && mouse_x<@launcher.x+100 && mouse_y>=@launcher.y && mouse_y<@launcher.y+30 && prefs['launch']
       open if hot || click
     rescue StandardError => e
       @last_error=e.message
@@ -250,16 +260,84 @@ module RPGMToolkit
     def maps
       @maps ||= load_data('Data/MapInfos.'+(engine==1 ? 'rxdata' : engine==2 ? 'rvdata' : 'rvdata2'))
     end
-    def transfer(id,x,y)
-      raise 'Combat en cours / Battle in progress' if battle?
-      ext=engine==1 ? 'rxdata' : engine==2 ? 'rvdata' : 'rvdata2'
-      map=load_data(sprintf('Data/Map%03d.%s',id,ext))
-      raise 'Position invalide / Invalid position' unless x>=0 && y>=0 && x<map.width && y<map.height
-      if $game_player.respond_to?(:reserve_transfer)
-        $game_player.reserve_transfer(id,x,y,2)
-      else
-        $game_temp.player_transferring=true; $game_temp.player_new_map_id=id; $game_temp.player_new_x=x; $game_temp.player_new_y=y; $game_temp.player_new_direction=2
+    def valid_place?(p)
+      p.is_a?(Array) && p.size==5 && p[0].is_a?(String) && p[0].size<=80 && p[1,4].all? { |n| n.is_a?(Integer) } && p[1]>0 && p[2]>=0 && p[3]>=0 && [2,4,6,8].include?(p[4])
+    end
+    def current_place(name)
+      [name.to_s[0,80],$game_map.map_id,$game_player.x,$game_player.y,$game_player.direction]
+    end
+    def save_place(name)
+      raise 'Nom requis / Name required' if name.strip.empty?
+      raise '100 maximum' if prefs['places'].size>=100
+      prefs['places'] << current_place(name.strip); persist
+    end
+    def transferring?
+      $game_player.respond_to?(:transfer?) ? $game_player.transfer? : $game_temp.player_transferring
+    end
+    def finish_travel
+      return unless @pending_travel
+      return if transferring?
+      p=@pending_travel; @pending_travel=nil
+      if $game_map.map_id==p[1] && $game_player.x==p[2] && $game_player.y==p[3]
+        prefs['last_location']=p[0]; persist
       end
+    end
+    def safe_destination(map,x,y)
+      blocked={}
+      map.events.values.each { |e| blocked[[e.x,e.y]]=true unless e.respond_to?(:list) && !e.list }
+      if map.respond_to?(:vehicles)
+        map.vehicles.each { |v| blocked[[v.x,v.y]]=true if v.instance_variable_get(:@map_id)==map.map_id }
+      end
+      free=lambda do |a,b|
+        a>=0 && b>=0 && a<map.width && b<map.height && !blocked[[a,b]] && !(map.respond_to?(:damage_floor?) && map.damage_floor?(a,b))
+      end
+      pass=lambda { |a,b,d| engine==2 ? map.passable?(a,b) : map.passable?(a,b,d) }
+      count=0
+      (0..map.width+map.height).each do |radius|
+        low=[0,y-radius].max; high=[map.height-1,y+radius].min
+        gap=radius-[x,map.width-1-x].max
+        ranges=gap>0 ? [[low,[high,y-gap].min],[[low,y+gap].max,high]] : [[low,high]]
+        ranges.each do |limits|
+        (limits[0]..limits[1]).each do |b|
+          dx=radius-(b-y).abs
+          (dx==0 ? [x] : [x-dx,x+dx]).each do |a|
+            next unless a>=0 && a<map.width
+            count+=1; raise 'Recherche trop etendue / Search limit reached' if count>250000
+            next unless free.call(a,b)
+            [[0,1,2],[-1,0,4],[1,0,6],[0,-1,8]].each do |step|
+              nx=a+step[0]; ny=b+step[1]; d=step[2]
+              nx=map.round_x(nx) if map.respond_to?(:round_x)
+              ny=map.round_y(ny) if map.respond_to?(:round_y)
+              return [a,b] if (nx!=a || ny!=b) && free.call(nx,ny) && pass.call(a,b,d) && pass.call(nx,ny,10-d)
+            end
+          end
+        end
+      end
+      end
+      raise 'Aucune position sure / No safe position'
+    end
+    def transfer(id,x,y,direction=2)
+      raise 'Combat en cours / Battle in progress' if battle?
+      raise 'Transfert en cours / Transfer in progress' if transferring? || @pending_travel
+      raise 'Evenement en cours / Event in progress' if ($game_map.respond_to?(:interpreter) && $game_map.interpreter.running?) || (defined?($game_system) && $game_system.respond_to?(:map_interpreter) && $game_system.map_interpreter.running?)
+      raise 'Quittez le vehicule / Leave vehicle' if $game_player.respond_to?(:in_vehicle?) && $game_player.in_vehicle?
+      raise 'Carte inconnue / Unknown map' unless maps.has_key?(id)
+      raise 'Direction invalide / Invalid direction' unless [2,4,6,8].include?(direction)
+      ext=engine==1 ? 'rxdata' : engine==2 ? 'rvdata' : 'rvdata2'
+      data=load_data(sprintf('Data/Map%03d.%s',id,ext))
+      raise 'Position invalide / Invalid position' unless x.is_a?(Integer) && y.is_a?(Integer) && x>=0 && y>=0 && x<data.width && y<data.height
+      if prefs['safe_teleport']
+        map=$game_map
+        if id!=map.map_id then map=Game_Map.new; map.setup(id); end
+        x,y=safe_destination(map,x,y)
+      end
+      before=current_place(t(:last_location))
+      if $game_player.respond_to?(:reserve_transfer)
+        $game_player.reserve_transfer(id,x,y,direction)
+      else
+        $game_temp.player_transferring=true; $game_temp.player_new_map_id=id; $game_temp.player_new_x=x; $game_temp.player_new_y=y; $game_temp.player_new_direction=direction
+      end
+      @pending_travel=[before,id,x,y]
     end
     def export_aliases(names_only=false)
       list=catalog(CATEGORIES.reject { |c| c==:favorites || c==:self_switches })
@@ -397,7 +475,8 @@ module RPGMToolkit
       elsif @mode==:home then draw_home
       else draw_tools end
       rail
-      @b.fill_rect(0,@h-35,@w,35,color([23,26,32])); text(8,@h-35,@w-132,35,@message,true)
+      @b.fill_rect(0,@h-35,@w,35,color([23,26,32])); text(RPGMToolkit.prefs['bottom_close'] ? 42 : 8,@h-35,@w-166,35,@message,true)
+      button(6,@h-32,30,28,'X') { @done=true } if RPGMToolkit.prefs['bottom_close']
       button(@w-120,@h-32,112,28,t(:save)) { RPGMToolkit.persist; @message='OK' }
     end
     def row(label,description=nil,&action)
@@ -445,7 +524,8 @@ module RPGMToolkit
         button(256,y,110,30,@modal[:kind]) { kinds=['int','float','bool','string']; @modal[:kind]=kinds[(kinds.index(@modal[:kind])+1)%kinds.size] }
       end
       end
-      button(8,@h-38,110,30,t(:cancel)) { @modal=nil }
+      button(6,@h-38,30,30,'X') { @done=true } if RPGMToolkit.prefs['bottom_close']
+      button(RPGMToolkit.prefs['bottom_close'] ? 42 : 8,@h-38,110,30,t(:cancel)) { @modal=nil }
       button(@w-128,@h-38,120,30,t(:apply)) { m=@modal; safe { m[:apply].call(m[:text]); @modal=nil } }
       @content=5*cellh+40; rail
     end
@@ -542,6 +622,14 @@ module RPGMToolkit
         quick(t(:gold),$game_party.gold) { |v| $game_party.gain_gold([v,0].max-$game_party.gold) }
         row(t(:save)) { RPGMToolkit.save_game; @done=true unless RPGMToolkit.battle? }
       when :teleport
+        row(t(:safe_teleport)+': '+(RPGMToolkit.prefs['safe_teleport'] ? '[ON]' : '[OFF]')) { RPGMToolkit.prefs['safe_teleport']=!RPGMToolkit.prefs['safe_teleport']; RPGMToolkit.persist }
+        row(t(:save_place)) { prompt(t(:save_place),'') { |name| RPGMToolkit.save_place(name) } }
+        last=RPGMToolkit.prefs['last_location']
+        row(t(:last_location)+' #'+last[1].to_s+' '+last[2].to_s+','+last[3].to_s) { RPGMToolkit.transfer(last[1],last[2],last[3],last[4]); @done=true } unless last.empty?
+        RPGMToolkit.prefs['places'].each_with_index do |place,index|
+          row((index+1).to_s+'. '+place[0]+' #'+place[1].to_s+' '+place[2].to_s+','+place[3].to_s) { RPGMToolkit.transfer(place[1],place[2],place[3],place[4]); @done=true }
+        end
+        row(t(:places)+' - '+t(:delete).split(' ')[0]) { prompt('ID (1-'+RPGMToolkit.prefs['places'].size.to_s+')','') { |v| i=Integer(v)-1; raise 'ID' unless i>=0 && i<RPGMToolkit.prefs['places'].size; RPGMToolkit.prefs['places'].delete_at(i); RPGMToolkit.persist } } unless RPGMToolkit.prefs['places'].empty?
         row(t(:search)+': '+@query) { prompt(t(:search),@query) { |s| @query=s; @scroll=0 } }
         RPGMToolkit.maps.keys.sort.each do |id|
           name=RPGMToolkit.maps[id].name; next unless (id.to_s+' '+name.downcase).include?(@query.downcase)
@@ -562,6 +650,8 @@ module RPGMToolkit
         row(t(:search)+': '+@query) { prompt(t(:search),@query) { |s| @query=s; @scroll=0 } }
         RPGMToolkit.records(@category).each { |r| next unless (r[1].to_s+' '+r[2].downcase).include?(@query.downcase); row(r[1].to_s+' '+RPGMToolkit.name(r)) { prompt('English',RPGMToolkit.name(r)) { |s| RPGMToolkit.prefs['aliases'][RPGMToolkit.key(r)]=[r[2],s]; RPGMToolkit.persist } } }
       when :settings
+        ['button_x','button_y'].each { |k| row(t(k.to_sym)+': '+RPGMToolkit.prefs[k].to_s+'%') { prompt(t(k.to_sym),RPGMToolkit.prefs[k]) { |v| n=Integer(v); raise '0-100' unless n>=0 && n<=100; RPGMToolkit.prefs[k]=n; RPGMToolkit.persist } } }
+        row(t(:bottom_close)+': '+(RPGMToolkit.prefs['bottom_close'] ? '[ON]' : '[OFF]')) { RPGMToolkit.prefs['bottom_close']=!RPGMToolkit.prefs['bottom_close']; RPGMToolkit.persist }
         row(t(:language)+': '+RPGMToolkit.prefs['language']) { RPGMToolkit.prefs['language']=RPGMToolkit.prefs['language']=='fr' ? 'en' : 'fr'; RPGMToolkit.persist }
         [['font',[14,18,22]],['rail',[18,24,32]],['rows',[20,40,60,80]]].each { |k,values| row(t(k=='rows' ? :page : k.to_sym)+': '+RPGMToolkit.prefs[k].to_s) { RPGMToolkit.prefs[k]=values[(values.index(RPGMToolkit.prefs[k])+1)%values.size]; RPGMToolkit.persist } }
         row(t(:launch)+': '+RPGMToolkit.prefs['launch'].to_s) { RPGMToolkit.prefs['launch']=!RPGMToolkit.prefs['launch']; RPGMToolkit.persist }

@@ -1,4 +1,10 @@
 var toolkitEnglish = {
+    'Nom de l’emplacement':'Location name','Enregistrer l’emplacement actuel':'Save current location','Dernier emplacement':'Last location','Emplacement enregistré.':'Location saved.',
+    'Position horizontale':'Horizontal position','Position verticale':'Vertical position','Fermeture en bas à gauche':'Close button at bottom left',
+    'Aucune position sûre sur cette carte.':'No safe position on this map.','Passages de la carte indisponibles.':'Map passage data unavailable.',
+    'Descendez du véhicule avant de vous téléporter.':'Leave the vehicle before teleporting.','Téléportation en cours.':'Teleport in progress.',
+    'Nom requis.':'Name required.','100 emplacements maximum.':'100 saved locations maximum.',
+    'Recherche sûre trop étendue. Choisissez une autre position.':'Safe search limit reached. Choose another position.',
     'Défilement':'Scroll','Paramètres':'Settings','Langue, affichage et raccourcis':'Language, display and shortcuts','Langue':'Language','Français':'French','Anglais':'English',
     'Taille du texte':'Text size','Barre de défilement':'Scrollbar width','Lignes par page':'Rows per page','Raccourci':'Shortcut','Bouton Toolbox':'Toolbox button',
     'Éditeurs':'Editors','Variables, objets, armes, armures…':'Variables, items, weapons, armor…','Traductions':'Translations','Noms anglais · tout traduire et reprendre':'English names · translate all and resume',
@@ -75,8 +81,9 @@ function settingsSelect(label,key,options) {
 function renderSettings() {
     openModal('settings','Paramètres');
     $('.rt-modal-content').innerHTML = settingsSelect('Langue','language',[['fr','Français'],['en','English']])+settingsSelect('Taille du texte','fontSize',[[12,'12 px'],[13,'13 px'],[15,'15 px'],[17,'17 px']])+settingsSelect('Barre de défilement','scrollbarWidth',[[18,'18 px'],[24,'24 px'],[32,'32 px']])+settingsSelect('Lignes par page','pageSize',[[20,20],[40,40],[60,60],[80,80]])+settingsSelect('Raccourci','hotkey',[['F6','F6'],['F7','F7'],['F10','F10']])+'<label class="rt-toggle"><span>Bouton Toolbox</span><input type="checkbox" role="switch" data-setting="showButton"><span class="rt-toggle-track" aria-hidden="true"></span></label>';
+    $('.rt-modal-content').innerHTML += '<label class="rt-field"><span>Position horizontale</span><input type="range" min="0" max="100" step="1" data-setting="buttonX"></label><label class="rt-field"><span>Position verticale</span><input type="range" min="0" max="100" step="1" data-setting="buttonY"></label><label class="rt-toggle"><span>Fermeture en bas à gauche</span><input type="checkbox" role="switch" data-setting="bottomClose"><span class="rt-toggle-track" aria-hidden="true"></span></label>';
     var settings=runtime.prefs.settings;
-    Array.prototype.forEach.call(root.querySelectorAll('[data-setting]'),function(el){var key=el.getAttribute('data-setting');if(key==='showButton')el.checked=settings[key]&&!!launch;else el.value=settings[key]||(key==='pageSize'?pageSize:hotkey);});
+    Array.prototype.forEach.call(root.querySelectorAll('[data-setting]'),function(el){var key=el.getAttribute('data-setting');if(el.type==='checkbox')el.checked=!!settings[key];else el.value=(key==='buttonX'||key==='buttonY')?settings[key]:settings[key]||(key==='pageSize'?pageSize:hotkey);});
 }
 function applySettings() {
     var settings=runtime.prefs.settings;
@@ -84,16 +91,26 @@ function applySettings() {
     root.lang=settings.language;
     root.style.setProperty('--rt-font-size',settings.fontSize+'px');root.style.setProperty('--rt-scrollbar-width',settings.scrollbarWidth+'px');
     if(launch){launch.setAttribute('aria-label',(settings.language==='en'?'Open Toolbox':'Ouvrir Toolbox')+' ('+hotkey+')');launch.textContent='Toolbox · '+hotkey;launch.hidden=opened||!settings.showButton||!allowed();}
+    root.classList.toggle('rt-close-recall',settings.bottomClose);
+    positionLauncher(); var recall=$('.rt-bottom-close'); if(recall)recall.hidden=!settings.bottomClose;
     localizeToolkit();fitToolboxModal();if(typeof refreshToolkitScroll==='function')refreshToolkitScroll();
 }
 function installSettings() {
     root.addEventListener('change',function(event){
         var key=event.target.getAttribute('data-setting');if(!key)return;
         var value=event.target.type==='checkbox'?event.target.checked:event.target.value;
-        if(['fontSize','scrollbarWidth','pageSize'].indexOf(key)>=0)value=Number(value);
+        if(['fontSize','scrollbarWidth','pageSize','buttonX','buttonY'].indexOf(key)>=0)value=Number(value);
         runtime.prefs.settings[key]=value;runtime.savePrefs();if(key==='showButton'&&value&&!launch)mountLauncher(true);applySettings();
         if(key==='pageSize')renderList();
         if(runtime.storageWarning())say('Stockage local indisponible : exportez vos traductions pour les conserver.',true);
     });
     if(g.MutationObserver)new g.MutationObserver(localizeToolkit).observe(root,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['aria-label','placeholder','title','label']});
+}
+
+function positionLauncher() {
+    if(!launch||!runtime)return;
+    var s=runtime.prefs.settings, v=g.visualViewport, w=v?v.width:g.innerWidth, h=v?v.height:g.innerHeight;
+    launch.style.right='auto';launch.style.bottom='auto';
+    launch.style.left=((v?v.offsetLeft:0)+8+Math.max(0,w-(launch.offsetWidth||140)-16)*s.buttonX/100)+'px';
+    launch.style.top=((v?v.offsetTop:0)+8+Math.max(0,h-(launch.offsetHeight||34)-16)*s.buttonY/100)+'px';
 }

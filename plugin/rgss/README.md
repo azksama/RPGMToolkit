@@ -1,4 +1,4 @@
-# RPGM Toolkit RGSS — 1.6.0
+# RPGM Toolkit RGSS — 1.7.0
 
 | Moteur | Scripts | Archive standard |
 | --- | --- | --- |
@@ -31,3 +31,12 @@ Les cinq familles XP/VX/VX Ace/MV/MZ sont ciblées ; aucune garantie universelle
 Les tests automatisés du module Ruby simulent les API des trois RGSS sous Ruby moderne. Ils ne remplacent pas un test du jeu réel sous RGSS1/2/3 ou JoiPlay. La syntaxe du module évite les fonctionnalités Ruby modernes.
 
 Tests : `ruby plugin/rgss/runtime_test.rb 1` (puis 2 et 3). Des dimensions peuvent suivre : `ruby plugin/rgss/runtime_test.rb 3 640 360`.
+
+
+## Téléportation — 1.7
+
+Safe Teleport est activé par défaut. Le module utilise les passages du moteur et recherche une sortie praticable sans No Clip. Les positions bloquées ou isolées sont refusées ; les événements et véhicules sont évités. Les sols dangereux sont exclus lorsque le moteur expose `damage_floor?`.
+
+**Enregistrer ici** conserve un emplacement nommé. **Dernier emplacement** est mis à jour après l’arrivée ; sélectionner son entrée permet de revenir en arrière. Jusqu’à 100 emplacements par jeu sont conservés dans le fichier des préférences.
+
+Paramètres propose les positions horizontale et verticale de Toolbox (0–100 %) et la fermeture supplémentaire en bas à gauche. Les contrôles sont accessibles au clavier ou via les extensions tactiles du runtime.

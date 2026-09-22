@@ -1,4 +1,4 @@
-# Toolbox 1.6.0
+# Toolbox 1.7.0
 
 Sur une carte ou un combat chargé, **Toolbox** (en haut à gauche) ou F6 ouvre le menu global. Godmode et No Clip se basculent directement dans ce menu ; les autres boutons ouvrent un sous-menu. **‹** et la croix d’une fenêtre reviennent au menu précédent. La croix du panneau principal ferme le Toolkit et reprend le jeu.
 
@@ -25,7 +25,7 @@ MyMemory n’est pas obligatoire pour les dictionnaires : **Exporter les noms à
 
 ## Mise à jour
 
-Fermez le jeu, installez l’APK 1.6.0, puis **Mod inclus → jeu → Réinstaller / mettre à jour**. Mettre à jour l’application seule ne remplace pas le plugin déjà installé dans le jeu. Alternative : remplacer `js/plugins/RPGMToolkit.js` (ou `www/js/plugins/RPGMToolkit.js`) par le fichier de la nouvelle archive du mod.
+Fermez le jeu, installez l’APK 1.7.0, puis **Mod inclus → jeu → Réinstaller / mettre à jour**. Mettre à jour l’application seule ne remplace pas le plugin déjà installé dans le jeu. Alternative : remplacer `js/plugins/RPGMToolkit.js` (ou `www/js/plugins/RPGMToolkit.js`) par le fichier de la nouvelle archive du mod.
 
 ## Validation
 
@@ -38,3 +38,14 @@ Paramètres conserve par jeu la langue de l’interface (français/anglais), la 
 En combat, HP/MP propose les ennemis du groupe actuel. Les actions rapides 0, +1000 et −1000 modifient immédiatement le paramètre sélectionné, avec bornes du moteur. Le niveau minimum reste 1. Les bonus de statistiques peuvent être négatifs. Godmode continue de protéger uniquement l’équipe. Téléportation et sauvegarde restent indisponibles pendant un combat.
 
 Dans Traductions, Supprimer efface le dictionnaire local de ce jeu et arrête la traduction en cours. Les favoris, paramètres et fichiers JSON exportés restent conservés.
+
+
+## Téléportation et emplacements — 1.7
+
+**Safe Teleport**, activé par défaut, conserve les coordonnées demandées si une sortie praticable existe, ou choisit la case sûre la plus proche. Les collisions des tuiles et événements sont contrôlées ; le mode No Clip ne contourne pas ce contrôle. Si la carte est entièrement bloquée, illisible, ou dépasse la limite de recherche, le transfert est refusé. Les transferts en véhicule sont refusés.
+
+Dans Téléportation, saisir un nom et choisir **Enregistrer l’emplacement actuel**. Un clic sur un emplacement enregistré lance le transfert vers ses coordonnées et sa direction. **Dernier emplacement** conserve la position de départ du dernier transfert réussi du Toolkit. Un retour remplace ce dernier emplacement par le point que l’on vient de quitter. Les emplacements restent enregistrés après fermeture du jeu, séparément des sauvegardes de partie.
+
+Dans Paramètres, **Position horizontale** et **Position verticale** déplacent Toolbox dans la fenêtre du jeu. **Fermeture en bas à gauche** ajoute un second bouton de fermeture, y compris dans les sous-menus. Ces réglages sont persistants.
+
+Le mode sûr vérifie les règles de passage standard. Les obstacles mobiles, événements qui modifient la carte après l’arrivée ou extensions de collision propres à un jeu ne permettent pas de garantir tous les comportements futurs. Il ne vérifie pas qu’une zone mène au reste du scénario.

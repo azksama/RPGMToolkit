@@ -1,13 +1,14 @@
 {
   "name": "rpgm-toolkit",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "private": true,
   "scripts": {
     "build:mod": "node plugin/build.cjs",
     "test": "node --test plugin/tests/core.test.cjs plugin/tests/translation.test.cjs android/tests/scene-lifecycle.test.cjs plugin/tests/tools.test.cjs",
     "test:library": "npm --prefix android run build && node --test android/tests/library.test.cjs",
     "test:installer": "pwsh -NoProfile -ExecutionPolicy Bypass -File plugin/tests/installer.test.ps1",
-    "test:mobile": "node --test android/tests/mobile-layout.test.cjs android/tests/toolbox-mobile.test.cjs"
+    "test:mobile": "node --test android/tests/mobile-layout.test.cjs android/tests/toolbox-mobile.test.cjs",
+    "test:travel": "node --test plugin/tests/travel-ui.test.cjs"
   },
   "devDependencies": {
     "axe-core": "^4.13.0",

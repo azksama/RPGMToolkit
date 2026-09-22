@@ -1,6 +1,7 @@
 /* Session-scoped game tools. Wrappers are removed when disabled or on save load. */
-function createToolkitTools(g) {
+function createToolkitTools(g, runtime) {
     'use strict';
+    var travel = createToolkitTravel(g, runtime);
     var session = g.$gameVariables, god = false, noclip = false, hooks = [], epoch = 0;
     function integer(n, min, max) {
         if (!/^-?\d+$/.test(String(n).trim()) || !isFinite(Number(n)) || Number(n) < min || Number(n) > max) throw new Error('Entier attendu entre ' + min + ' et ' + max + '.');
@@ -24,7 +25,7 @@ function createToolkitTools(g) {
         });
     }
     function sync() {
-        if (session !== g.$gameVariables) { god = false; noclip = false; remove(); session = g.$gameVariables; epoch++; }
+        if (session !== g.$gameVariables) { god = false; noclip = false; remove(); session = g.$gameVariables; epoch++; travel.reset(); }
     }
     function ensureMap() {
         sync();
@@ -56,7 +57,7 @@ function createToolkitTools(g) {
         catch (e) { noclip = false; remove('noclip'); throw e; }
     }
     function tick() {
-        sync();
+        sync(); travel.tick();
         if (god) members().forEach(function(a) { if (a.hp < a.mhp || a.isStateAffected(a.deathStateId())) { a.setHp(a.mhp); a.removeState(a.deathStateId()); } });
     }
     function enemies() { return g.$gameParty.inBattle() && g.$gameTroop ? g.$gameTroop.members() : []; }
@@ -123,7 +124,7 @@ function createToolkitTools(g) {
         var token = epoch;
         function metadata(data) {
             sync(); if (token !== epoch) throw new Error('La partie a changé.');
-            return { id:id, width:integer(data.width,1,10000), height:integer(data.height,1,10000), epoch:token };
+            return { id:id, width:integer(data.width,1,10000), height:integer(data.height,1,10000), epoch:token, data:data };
         }
         if (id === g.$gameMap.mapId() && g.$dataMap && g.$dataMap.width) return Promise.resolve(metadata(g.$dataMap));
         return new Promise(function(resolve,reject) {
@@ -140,8 +141,8 @@ function createToolkitTools(g) {
         if (!map || map.epoch !== epoch || !g.$dataMapInfos[map.id]) throw new Error('Chargez d’abord la carte de destination.');
         x = integer(x,0,map.width-1); y = integer(y,0,map.height-1); direction = integer(direction,0,8);
         if ([0,2,4,6,8].indexOf(direction) < 0) throw new Error('Direction invalide.');
-        g.$gamePlayer.reserveTransfer(map.id,x,y,direction,0);
+        return travel.teleport(map,x,y,direction);
     }
-    return { sync:sync, tick:tick, setGod:setGod, setNoclip:setNoclip, members:members, enemies:enemies, resourceTargets:resourceTargets, resources:resources, adjustResource:adjustResource, stat:stat, adjustStat:adjustStat, maps:maps, loadMap:loadMap, teleport:teleport,
+    return { travel:travel, sync:sync, tick:tick, setGod:setGod, setNoclip:setNoclip, members:members, enemies:enemies, resourceTargets:resourceTargets, resources:resources, adjustResource:adjustResource, stat:stat, adjustStat:adjustStat, maps:maps, loadMap:loadMap, teleport:teleport,
         state:function() { sync(); return { god:god, noclip:noclip }; } };
 }

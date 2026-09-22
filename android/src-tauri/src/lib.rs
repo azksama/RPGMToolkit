@@ -13,7 +13,7 @@ struct Session {
     last_operation: String, last_error: Option<String>, code: String, mod_name: String, result: Option<PathBuf>, result_name: String, action: String,
 }
 impl Default for Session {
-    fn default()->Self { Self {folders:Vec::new(),folder_mode:false,scan_warnings:Vec::new(),last_operation:String::new(),last_error:None,snapshot:None,source:None,folder_token:String::new(),code:engine::EMBEDDED_MOD.into(),mod_name:"Toolkit 1.6.0 · inclus".into(),result:None,result_name:String::new(),action:String::new()} }
+    fn default()->Self { Self {folders:Vec::new(),folder_mode:false,scan_warnings:Vec::new(),last_operation:String::new(),last_error:None,snapshot:None,source:None,folder_token:String::new(),code:engine::EMBEDDED_MOD.into(),mod_name:"Toolkit 1.7.0 · inclus".into(),result:None,result_name:String::new(),action:String::new()} }
 }
 #[derive(Default)] struct AppState { session: Mutex<Session>, busy: AtomicBool }
 struct Busy<'a>(&'a AtomicBool);
@@ -130,7 +130,7 @@ async fn select_mod(app:AppHandle,request_id:String)->Result<Value,String>{job(a
     let code=engine::import_mod(&path);let _=std::fs::remove_file(path);s.code=code?;s.mod_name=data["name"].as_str().unwrap_or("ZIP du mod").into();clear_result(s);Ok(view(s))
 }).await}
 #[tauri::command]
-async fn reset_mod(app:AppHandle,request_id:String)->Result<Value,String>{job(app,request_id,|_,s|{s.code=engine::EMBEDDED_MOD.into();s.mod_name="Toolkit 1.6.0 · inclus".into();clear_result(s);Ok(view(s))}).await}
+async fn reset_mod(app:AppHandle,request_id:String)->Result<Value,String>{job(app,request_id,|_,s|{s.code=engine::EMBEDDED_MOD.into();s.mod_name="Toolkit 1.7.0 · inclus".into();clear_result(s);Ok(view(s))}).await}
 #[tauri::command]
 async fn apply_mod(app:AppHandle,uninstall:bool,request_id:String)->Result<Value,String>{job(app,request_id,move|app,s|{
     let snapshot=s.snapshot.clone().ok_or("Sélectionnez un jeu.")?;

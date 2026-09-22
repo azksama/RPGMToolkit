@@ -63,10 +63,24 @@ function toolPage(mode) {
     openModal(mode,titles[mode]); var html = '';
     if (mode === 'resources') html = '<form data-form="tool-resources">'+toolActorSelector(true)+'<p id="rt-tool-summary" class="rt-muted"></p>'+field('HP','rt-tool-hp',0,'number','min="0" step="1" required')+quickActions('hp')+field('MP','rt-tool-mp',0,'number','min="0" step="1" required')+quickActions('mp')+field('TP','rt-tool-tp',0,'number','min="0" step="1" required')+'<div class="rt-actions"><button type="submit" class="rt-primary">Appliquer</button>'+button('Tout restaurer','tool-heal')+'</div></form>';
     if (mode === 'stats') html = '<form data-form="tool-stats">'+toolActorSelector(false)+'<label class="rt-field"><span>Statistique</span><select id="rt-tool-param"><option value="level">Niveau</option><option value="exp">Expérience totale</option>'+['HP max','MP max','Attaque','Défense','Attaque magique','Défense magique','Agilité','Chance'].map(function(n,i){return '<option value="'+i+'">Bonus · '+n+'</option>';}).join('')+'</select></label><p id="rt-tool-summary" class="rt-muted"></p>'+field('Valeur','rt-tool-value',0,'number','step="1" required')+quickActions('stat')+'<button type="submit" class="rt-primary">Appliquer</button></form>';
-    if (mode === 'teleport') html = '<form data-form="tool-teleport">'+field('Rechercher une carte · nom ou ID','rt-map-query','','search','autocomplete="off"')+'<label class="rt-field"><span>Carte</span><select id="rt-tool-map"></select></label><p id="rt-map-summary" role="status"></p><div class="rt-coordinate-fields">'+field('X','rt-map-x',0,'number','min="0" step="1" required')+field('Y','rt-map-y',0,'number','min="0" step="1" required')+'</div><label class="rt-field"><span>Direction</span><select id="rt-map-direction"><option value="0">Conserver</option><option value="2">Bas</option><option value="4">Gauche</option><option value="6">Droite</option><option value="8">Haut</option></select></label><button id="rt-map-go" type="submit" class="rt-primary" disabled>Se téléporter</button></form>';
+    if (mode === 'teleport') html = '<label class="rt-toggle"><span>Safe Teleport</span><input type="checkbox" role="switch" data-setting="safeTeleport"'+(runtime.prefs.settings.safeTeleport?' checked':'')+'><span class="rt-toggle-track" aria-hidden="true"></span></label><form data-form="tool-save-place">'+field('Nom de l’emplacement','rt-place-name','','text','maxlength="80" required')+'<button type="submit">Enregistrer l’emplacement actuel</button></form><div id="rt-places"></div><form data-form="tool-teleport">'+field('Rechercher une carte · nom ou ID','rt-map-query','','search','autocomplete="off"')+'<label class="rt-field"><span>Carte</span><select id="rt-tool-map"></select></label><p id="rt-map-summary" role="status"></p><div class="rt-coordinate-fields">'+field('X','rt-map-x',0,'number','min="0" step="1" required')+field('Y','rt-map-y',0,'number','min="0" step="1" required')+'</div><label class="rt-field"><span>Direction</span><select id="rt-map-direction"><option value="0">Conserver</option><option value="2">Bas</option><option value="4">Gauche</option><option value="6">Droite</option><option value="8">Haut</option></select></label><button id="rt-map-go" type="submit" class="rt-primary" disabled>Se téléporter</button></form>';
     $('.rt-modal-content').innerHTML = html;
     if (mode === 'resources' || mode === 'stats') updateToolValues();
-    if (mode === 'teleport') { renderToolMaps(''); $('#rt-tool-map').value = String(g.$gameMap.mapId()); if (!$('#rt-tool-map').value) $('#rt-tool-map').selectedIndex = 0; loadToolMap(); }
+    if (mode === 'teleport') { renderPlaces(); renderToolMaps(''); $('#rt-tool-map').value = String(g.$gameMap.mapId()); if (!$('#rt-tool-map').value) $('#rt-tool-map').selectedIndex = 0; loadToolMap(); }
+}
+function renderPlaces() {
+    var last=gameTools.travel.last(), places=gameTools.travel.places();
+    function row(p,index,label) { return '<div class="rt-place-row"><button type="button" data-action="tool-place-go" data-place="'+index+'"><span data-game-text>'+esc(label||p.name)+'</span><small>#'+p.mapId+' · '+p.x+', '+p.y+'</small></button>'+(index==='last'?'':'<button type="button" data-action="tool-place-delete" data-place="'+index+'" aria-label="Supprimer">×</button>')+'</div>'; }
+    $('#rt-places').innerHTML=(last?row(last,'last',runtime.prefs.settings.language==='en'?'Last location':'Dernier emplacement'):'')+places.map(function(p,i){return row(p,i);}).join('');
+}
+function visitPlace(index) {
+    var p=index==='last'?gameTools.travel.last():gameTools.travel.places()[Number(index)], token=++toolboxMapToken;
+    if(!p)return;
+    say('Lecture de la carte…');
+    gameTools.loadMap(p.mapId).then(function(map){
+        if(!opened||modalMode!=='teleport'||token!==toolboxMapToken)return;
+        guarded(function(){gameTools.teleport(map,p.x,p.y,p.direction);closeToolkit();});
+    }).catch(function(e){if(opened&&modalMode==='teleport'&&token===toolboxMapToken)say(e.message,true);});
 }
 function updateToolValues() {
     var id = $('#rt-tool-actor').value, actors = modalMode === 'resources' ? gameTools.resourceTargets(id) : gameTools.members().filter(function(a){return String(a.actorId()) === id;}), a = actors[0];
@@ -106,6 +120,8 @@ function toolboxAction(action, node) {
     else if (mode === 'god' || mode === 'noclip') { if (mode === 'god') gameTools.setGod(!gameTools.state().god); else gameTools.setNoclip(!gameTools.state().noclip); node.setAttribute('aria-checked', String(gameTools.state()[mode])); }
     else if (mode === 'home') showToolboxHome();
     else if (mode === 'editors') { toolboxHome = false; root.classList.remove('rt-home-open'); render(); $('.rt-panel').focus(); }
+    else if (mode === 'place-go') visitPlace(node.getAttribute('data-place'));
+    else if (mode === 'place-delete') { gameTools.travel.forget(Number(node.getAttribute('data-place'))); renderPlaces(); }
     else if (mode === 'settings') renderSettings();
     else if (mode === 'quick') { var param=node.getAttribute('data-param'), adjust=node.getAttribute('data-adjust'), target=$('#rt-tool-actor').value; if (param === 'stat') gameTools.adjustStat(target,$('#rt-tool-param').value,adjust); else gameTools.adjustResource(target,param,adjust); dirty=true; updateToolValues(); }
     else if (mode === 'translations') { if (!translator.busy()) { translationScope = 'all'; pendingTranslations = []; } openModal('translations','Traductions'); renderTranslations(); }
@@ -116,6 +132,7 @@ function toolboxAction(action, node) {
     return true;
 }
 function toolboxSubmit(form) {
+    if(form==='tool-save-place'){gameTools.travel.remember($('#rt-place-name').value);$('#rt-place-name').value='';renderPlaces();say('Emplacement enregistré.');return true;}
     if (form === 'tool-resources') { gameTools.resources($('#rt-tool-actor').value,$('#rt-tool-hp').value,$('#rt-tool-mp').value,$('#rt-tool-tp').value,false); dirty=true;updateToolValues();say('Ressources mises à jour.');return true; }
     if (form === 'tool-stats') { gameTools.stat($('#rt-tool-actor').value,$('#rt-tool-param').value,$('#rt-tool-value').value);dirty=true;updateToolValues();say('Statistique mise à jour.');return true; }
     if (form === 'tool-teleport') { gameTools.teleport(toolboxMap,$('#rt-map-x').value,$('#rt-map-y').value,$('#rt-map-direction').value);closeToolkit();return true; }

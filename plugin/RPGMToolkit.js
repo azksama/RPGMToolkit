@@ -1,6 +1,6 @@
 /*:
  * @target MZ
- * @plugindesc v1.6.0 (MV/MZ) — Variables, inventaire, acteurs et traductions anglaises.
+ * @plugindesc v1.7.0 (MV/MZ) — Variables, inventaire, acteurs et traductions anglaises.
  * @author RPGM Toolkit
  *
  * @param Hotkey
@@ -34,7 +34,7 @@
  * @text Fermer le Toolkit
  *
  * @help
- * RPGM Toolkit 1.6.0 — RPG Maker MV 1.x / MZ
+ * RPGM Toolkit 1.7.0 — RPG Maker MV 1.x / MZ
  * Copiez ce fichier dans js/plugins, puis activez RPGMToolkit en dernier
  * dans le gestionnaire de plugins. Chargez une partie et appuyez sur F6.
  * Toolbox ouvre le menu global. Choisissez Éditeurs ou un outil de jeu.
@@ -69,7 +69,8 @@ function createToolkitRuntime(g, storage) {
     'use strict';
     var kinds = ['variables', 'switches', 'items', 'weapons', 'armors', 'actors', 'skills', 'states', 'selfSwitches'];
     var cache = {}, history = [], redo = [], log = [], baseline = {}, session = null;
-    var prefs = { english: true, source: 'ja', favorites: {}, aliases: {}, settings: { language:'fr', fontSize:13, scrollbarWidth:24, pageSize:0, hotkey:'', showButton:true } };
+    var prefs = { english: true, source: 'ja', favorites: {}, aliases: {}, settings: { language:'fr', fontSize:13, scrollbarWidth:24, pageSize:0, hotkey:'', showButton:true, safeTeleport:true, buttonX:0, buttonY:0, bottomClose:false } };
+    prefs.travel = { places:[], last:null };
     var storageWarning = false, frozen = {}, hooks = [], writing = false;
     function own(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
     function normal(value) {
@@ -97,6 +98,10 @@ function createToolkitRuntime(g, storage) {
         if ([20,40,60,80].indexOf(settings.pageSize) >= 0) prefs.settings.pageSize = settings.pageSize;
         if (['F6','F7','F10'].indexOf(settings.hotkey) >= 0) prefs.settings.hotkey = settings.hotkey;
         if (typeof settings.showButton === 'boolean') prefs.settings.showButton = settings.showButton;
+        ['safeTeleport','bottomClose'].forEach(function(k) { if (typeof settings[k] === 'boolean') prefs.settings[k] = settings[k]; });
+        ['buttonX','buttonY'].forEach(function(k) { if (typeof settings[k] === 'number' && isFinite(settings[k])) prefs.settings[k] = Math.max(0, Math.min(100, settings[k])); });
+        function place(p) { return p && typeof p.name === 'string' && p.name.length <= 80 && [p.mapId,p.x,p.y,p.direction].every(function(n) { return typeof n === 'number' && isFinite(n) && Math.floor(n) === n; }) && p.mapId > 0 && p.x >= 0 && p.y >= 0 && [2,4,6,8].indexOf(p.direction) >= 0; }
+        if (saved.travel) { prefs.travel.places = (Array.isArray(saved.travel.places) ? saved.travel.places : []).filter(place).slice(0,100); prefs.travel.last = place(saved.travel.last) ? saved.travel.last : null; }
         if (typeof saved.english === 'boolean') prefs.english = saved.english;
         if (/^[a-z]{2}(-[A-Za-z]{2,4})?$/.test(saved.source || '')) prefs.source = saved.source;
         Object.keys(saved.favorites || {}).slice(0, 50000).forEach(function(k) { if (/^[a-zA-Z]+:[0-9]+(?:\.[0-9]+\.[A-D])?$/.test(k)) prefs.favorites[k] = !!saved.favorites[k]; });
@@ -414,9 +419,108 @@ function createToolkitRuntime(g, storage) {
     };
 }
 
-/* Session-scoped game tools. Wrappers are removed when disabled or on save load. */
-function createToolkitTools(g) {
+function createToolkitTravel(g, runtime) {
     'use strict';
+    var prefs = runtime ? runtime.prefs : { settings:{ safeTeleport:true }, travel:{ places:[], last:null } }, pending = null;
+    function save() { if (runtime) runtime.savePrefs(); }
+    function position(name) {
+        var p = g.$gamePlayer, direction = p.direction ? p.direction() : 2;
+        return { name:String(name || '').trim().slice(0,80), mapId:g.$gameMap.mapId(), x:p.x, y:p.y, direction:direction };
+    }
+    function remember(name) {
+        if (!String(name || '').trim()) throw new Error('Nom requis.');
+        if (prefs.travel.places.length >= 100) throw new Error('100 emplacements maximum.');
+        var p = position(name);
+        if (!isFinite(p.x) || !isFinite(p.y) || p.mapId <= 0) throw new Error('Position indisponible.');
+        prefs.travel.places.push(p); save(); return p;
+    }
+    function activePage(event, mapId) {
+        var pages = event.pages || [];
+        for (var i = pages.length - 1; i >= 0; i--) {
+            var page = pages[i], c = page.conditions || {};
+            if (c.switch1Valid && !g.$gameSwitches.value(c.switch1Id)) continue;
+            if (c.switch2Valid && !g.$gameSwitches.value(c.switch2Id)) continue;
+            if (c.variableValid && g.$gameVariables.value(c.variableId) < c.variableValue) continue;
+            if (c.selfSwitchValid && !g.$gameSelfSwitches.value([mapId,event.id,c.selfSwitchCh])) continue;
+            if (c.itemValid && !g.$gameParty.hasItem(g.$dataItems[c.itemId])) continue;
+            if (c.actorValid && g.$gameParty.members().indexOf(g.$gameActors.actor(c.actorId)) < 0) continue;
+            return page;
+        }
+        return null;
+    }
+    function nearest(map, x, y) {
+        var data = map.data, live = map.id === g.$gameMap.mapId(), flags = g.$dataTilesets && data && g.$dataTilesets[data.tilesetId], blocked = {};
+        flags = flags && flags.flags;
+        if (!live && (!data || !Array.isArray(data.data) || !flags)) throw new Error('Passages de la carte indisponibles.');
+        if (live && typeof g.$gameMap.isPassable !== 'function') throw new Error('Passages de la carte indisponibles.');
+        if (live && g.$gameMap.events) {
+            g.$gameMap.events().forEach(function(e) { if (!e._erased && (!e.page || e.page())) blocked[e.x+','+e.y] = true; });
+            ['boat','ship','airship'].forEach(function(k) { var v = g.$gameMap[k] && g.$gameMap[k](); if (v && v._mapId === map.id) blocked[v.x+','+v.y] = true; });
+        } else (data.events || []).forEach(function(e) { if (e && activePage(e,map.id)) blocked[e.x+','+e.y] = true; });
+        function valid(a,b) { return a>=0 && b>=0 && a<map.width && b<map.height; }
+        function tileFlag(a,b,z) { return flags[data.data[(z*map.height+b)*map.width+a]]; }
+        function free(a,b) {
+            if (!valid(a,b) || blocked[a+','+b]) return false;
+            if (live) return !g.$gameMap.isDamageFloor || !g.$gameMap.isDamageFloor(a,b);
+            for (var z=0;z<4;z++) { var f=tileFlag(a,b,z); if (typeof f !== 'number' || (f & 256)) return false; }
+            return true;
+        }
+        function pass(a,b,d) {
+            if (live) return g.$gameMap.isPassable(a,b,d);
+            var bit = 1 << (d/2-1);
+            for (var z=3;z>=0;z--) { var f=tileFlag(a,b,z); if (f & 16) continue; return (f & bit) === 0; }
+            return false;
+        }
+        function safe(a,b) {
+            if (!free(a,b)) return false;
+            var directions = [[0,1,2],[-1,0,4],[1,0,6],[0,-1,8]];
+            return directions.some(function(step) {
+                var nx=a+step[0], ny=b+step[1], d=step[2];
+                if (data && (data.scrollType===2 || data.scrollType===3)) nx=(nx+map.width)%map.width;
+                if (data && (data.scrollType===1 || data.scrollType===3)) ny=(ny+map.height)%map.height;
+                return (nx!==a || ny!==b) && free(nx,ny) && pass(a,b,d) && pass(nx,ny,10-d);
+            });
+        }
+        var count=0;
+        for (var radius=0;radius<=map.width+map.height;radius++) {
+            for (var b=Math.max(0,y-radius);b<=Math.min(map.height-1,y+radius);b++) {
+                var dy=radius-Math.max(x,map.width-1-x);
+                if (dy>0 && b>y-dy && b<y+dy) { b=y+dy-1; continue; }
+                var dx=radius-Math.abs(b-y), candidates=dx ? [x-dx,x+dx] : [x];
+                for (var i=0;i<candidates.length;i++) {
+                    var a=candidates[i]; if (!valid(a,b)) continue;
+                    if (++count>250000) throw new Error('Recherche sûre trop étendue. Choisissez une autre position.');
+                    if (safe(a,b)) return { x:a, y:b };
+                }
+            }
+        }
+        throw new Error('Aucune position sûre sur cette carte.');
+    }
+    function teleport(map,x,y,direction) {
+        if (pending) throw new Error('Téléportation en cours.');
+        if (g.$gamePlayer.isInVehicle && g.$gamePlayer.isInVehicle()) throw new Error('Descendez du véhicule avant de vous téléporter.');
+        var target = prefs.settings.safeTeleport ? nearest(map,x,y) : { x:x, y:y }, from=position('Dernier emplacement');
+        g.$gamePlayer.reserveTransfer(map.id,target.x,target.y,direction,0);
+        pending = { from:from, mapId:map.id, x:target.x, y:target.y, session:g.$gameVariables };
+        return target;
+    }
+    function tick() {
+        if (!pending) return;
+        if (pending.session !== g.$gameVariables) { pending=null; return; }
+        if (g.$gamePlayer.isTransferring()) return;
+        var p=pending; pending=null;
+        if (g.$gameMap.mapId()===p.mapId && g.$gamePlayer.x===p.x && g.$gamePlayer.y===p.y) { prefs.travel.last=p.from; save(); }
+    }
+    return { nearest:nearest, teleport:teleport, tick:tick, remember:remember, position:position,
+        places:function() { return prefs.travel.places; }, last:function() { return prefs.travel.last; },
+        forget:function(index) { if (index>=0 && index<prefs.travel.places.length) { prefs.travel.places.splice(index,1); save(); } },
+        reset:function() { pending=null; } };
+}
+
+/* Session-scoped game tools. Wrappers are removed when disabled or on save load. */
+function createToolkitTools(g, runtime) {
+    'use strict';
+    var travel = createToolkitTravel(g, runtime);
     var session = g.$gameVariables, god = false, noclip = false, hooks = [], epoch = 0;
     function integer(n, min, max) {
         if (!/^-?\d+$/.test(String(n).trim()) || !isFinite(Number(n)) || Number(n) < min || Number(n) > max) throw new Error('Entier attendu entre ' + min + ' et ' + max + '.');
@@ -440,7 +544,7 @@ function createToolkitTools(g) {
         });
     }
     function sync() {
-        if (session !== g.$gameVariables) { god = false; noclip = false; remove(); session = g.$gameVariables; epoch++; }
+        if (session !== g.$gameVariables) { god = false; noclip = false; remove(); session = g.$gameVariables; epoch++; travel.reset(); }
     }
     function ensureMap() {
         sync();
@@ -472,7 +576,7 @@ function createToolkitTools(g) {
         catch (e) { noclip = false; remove('noclip'); throw e; }
     }
     function tick() {
-        sync();
+        sync(); travel.tick();
         if (god) members().forEach(function(a) { if (a.hp < a.mhp || a.isStateAffected(a.deathStateId())) { a.setHp(a.mhp); a.removeState(a.deathStateId()); } });
     }
     function enemies() { return g.$gameParty.inBattle() && g.$gameTroop ? g.$gameTroop.members() : []; }
@@ -539,7 +643,7 @@ function createToolkitTools(g) {
         var token = epoch;
         function metadata(data) {
             sync(); if (token !== epoch) throw new Error('La partie a changé.');
-            return { id:id, width:integer(data.width,1,10000), height:integer(data.height,1,10000), epoch:token };
+            return { id:id, width:integer(data.width,1,10000), height:integer(data.height,1,10000), epoch:token, data:data };
         }
         if (id === g.$gameMap.mapId() && g.$dataMap && g.$dataMap.width) return Promise.resolve(metadata(g.$dataMap));
         return new Promise(function(resolve,reject) {
@@ -556,9 +660,9 @@ function createToolkitTools(g) {
         if (!map || map.epoch !== epoch || !g.$dataMapInfos[map.id]) throw new Error('Chargez d’abord la carte de destination.');
         x = integer(x,0,map.width-1); y = integer(y,0,map.height-1); direction = integer(direction,0,8);
         if ([0,2,4,6,8].indexOf(direction) < 0) throw new Error('Direction invalide.');
-        g.$gamePlayer.reserveTransfer(map.id,x,y,direction,0);
+        return travel.teleport(map,x,y,direction);
     }
-    return { sync:sync, tick:tick, setGod:setGod, setNoclip:setNoclip, members:members, enemies:enemies, resourceTargets:resourceTargets, resources:resources, adjustResource:adjustResource, stat:stat, adjustStat:adjustStat, maps:maps, loadMap:loadMap, teleport:teleport,
+    return { travel:travel, sync:sync, tick:tick, setGod:setGod, setNoclip:setNoclip, members:members, enemies:enemies, resourceTargets:resourceTargets, resources:resources, adjustResource:adjustResource, stat:stat, adjustStat:adjustStat, maps:maps, loadMap:loadMap, teleport:teleport,
         state:function() { sync(); return { god:god, noclip:noclip }; } };
 }
 
@@ -648,8 +752,14 @@ function createToolkitTranslator(runtime, g) {
     return { translate: translate, cancel: cancel, busy: function() { return !!active; } };
 }
 
-var TOOLKIT_CSS = "/* Compact full-screen editor. No width-dependent sidebar or oversized touch theme. */\n.rt,.rt-launch { box-sizing:border-box; font:13px/1.4 system-ui,'Segoe UI',Arial,sans-serif; color:#eef0f4; text-align:left; letter-spacing:normal; }\n.rt *,.rt *::before,.rt *::after { box-sizing:border-box; }\n.rt { position:fixed; z-index:2147483001; inset:0; display:flex; padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px); background:#181a1f; user-select:text; }\n.rt[hidden],.rt [hidden],.rt-launch[hidden] { display:none !important; }\n.rt header,.rt main,.rt footer,.rt section,.rt aside,.rt nav { position:static; top:auto; right:auto; bottom:auto; left:auto; float:none; margin:0; }\n.rt button,.rt input,.rt select,.rt textarea { font:inherit; color:inherit; margin:0; touch-action:manipulation; }\n.rt button { cursor:pointer; border:1px solid #4f5663; border-radius:4px; background:#292d35; padding:4px 8px; min-height:30px; line-height:1.2; white-space:nowrap; }\n.rt button:hover { background:#363d49; }\n.rt button:disabled { opacity:.38; cursor:default; }\n.rt button:focus-visible,.rt input:focus-visible,.rt select:focus-visible,.rt textarea:focus-visible,.rt-launch:focus-visible { outline:2px solid #a9cafa; outline-offset:-2px; }\n.rt button[aria-pressed=true] { color:#b7d3fb; border-color:#799dcd; background:#2a3b53; }\n.rt .rt-primary { background:#91b8ee; color:#10223a; border-color:#91b8ee; font-weight:600; }\n.rt .rt-primary:hover { background:#b2cff7; color:#10223a; }\n.rt input:not([type=checkbox]),.rt select,.rt textarea { width:100%; min-width:0; border:1px solid #535c6c; border-radius:4px; background:#15171c; padding:4px 7px; min-height:30px; }\n.rt input::placeholder { color:#a9b2c1; opacity:1; }\n.rt input[type=checkbox] { width:16px; height:16px; accent-color:#91b8ee; flex-shrink:0; cursor:pointer; }\n.rt .rt-panel { display:flex; flex-direction:column; width:100%; height:100%; min-height:0; min-width:0; overflow:hidden; background:#1e2127; }\n.rt .rt-header { flex-shrink:0; padding:5px 8px; border-bottom:1px solid #505764; background:#191c22; }\n.rt .rt-search-line { display:flex; gap:6px; align-items:center; }\n.rt .rt-search { flex:1; min-width:0; }\n.rt .rt-close { min-width:32px; width:32px; padding:0; flex-shrink:0; }\n.rt .rt-filter-line { display:flex; gap:6px; margin-top:5px; }\n.rt .rt-filter-line label { flex:1; min-width:0; }\n.rt .rt-filter-line select { padding-right:2px; }\n.rt .rt-main { display:flex; flex-direction:column; min-height:0; min-width:0; flex:1; overflow:hidden; }\n.rt .rt-bulkbar { display:flex; justify-content:space-between; gap:6px; align-items:center; min-height:30px; padding:0 6px; border-bottom:1px solid #444c59; background:#252932; font-size:11px; flex-shrink:0; }\n.rt .rt-page-check { display:flex; align-items:center; gap:6px; min-height:30px; cursor:pointer; }\n.rt #rt-bulk-actions { display:flex; gap:3px; }\n.rt #rt-bulk-actions button { min-height:26px; padding:3px 6px; font-size:11px; }\n.rt .rt-list { flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; touch-action:pan-y; list-style:none; margin:0; padding:0; scrollbar-width:thin; }\n.rt .rt-row { display:flex; align-items:center; gap:4px; height:36px; min-height:36px; padding:2px 6px; border-bottom:1px solid #383f4b; }\n.rt .rt-row:nth-child(even) { background:#23272f; }\n.rt .rt-row.rt-frozen { box-shadow:inset 2px 0 #91b8ee; }\n.rt .rt-row-check { display:flex; align-items:center; justify-content:center; width:24px; height:32px; flex-shrink:0; cursor:pointer; }\n.rt .rt-select { display:flex; align-items:center; gap:6px; flex:1; min-width:0; text-align:left; border:0; background:transparent; padding:0 3px; height:30px; }\n.rt .rt-select:hover { background:transparent; }\n.rt .rt-row-id { color:#a8b3c4; font-size:10px; flex-shrink:0; max-width:64px; overflow:hidden; text-overflow:ellipsis; }\n.rt .rt-row-title { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }\n.rt .rt-row-value { font:12px/1.4 Consolas,monospace; flex-shrink:0; width:72px; padding:2px 4px; border:1px solid #4b5565; border-radius:3px; background:#161b23; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right; }\n.rt .rt-row-actions { display:flex; align-items:center; gap:3px; flex-shrink:0; }\n.rt .rt-quick { min-width:28px; min-height:28px; height:28px; padding:2px 4px; font-size:12px; }\n.rt .rt-pagination { display:flex; align-items:center; justify-content:space-between; gap:8px; height:30px; padding:2px 8px; border-top:1px solid #4c5462; background:#191d24; font-size:11px; flex-shrink:0; }\n.rt .rt-pagination > div { display:flex; align-items:center; gap:4px; }\n.rt .rt-pagination button { min-height:24px; height:24px; min-width:28px; padding:0 5px; font-size:17px; }\n.rt .rt-pagination input { width:42px; min-height:24px; height:24px; padding:1px 2px; text-align:center; font-size:11px; -moz-appearance:textfield; }\n.rt .rt-pagination input::-webkit-inner-spin-button { -webkit-appearance:none; }\n.rt .rt-footer { display:flex; align-items:center; gap:8px; padding:4px 8px; min-height:38px; background:#16191f; border-top:1px solid #505867; flex-shrink:0; }\n.rt .rt-footer button { font-size:12px; }\n.rt .rt-status { flex:1; min-width:0; font-size:11px; color:#bdcce1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }\n.rt .rt-error { color:#ffbda9; }\n.rt .rt-modal { position:absolute; inset:0; z-index:2; display:flex; align-items:center; justify-content:center; padding:12px; background:#080b10c9; }\n.rt .rt-modal-dialog { width:480px; max-width:100%; max-height:100%; min-height:0; display:flex; flex-direction:column; border:1px solid #73839d; border-radius:8px; background:#242932; box-shadow:0 16px 48px #0009; overflow:hidden; }\n.rt .rt-modal-dialog > header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 12px; border-bottom:1px solid #505c70; background:#1b2029; }\n.rt .rt-modal-dialog > header h2 { margin:0; font-size:15px; font-weight:600; }\n.rt .rt-modal-content { overflow-y:auto; min-height:0; padding:12px; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; overflow-wrap:anywhere; }\n.rt .rt-modal-status { padding:0 12px 8px; font-size:12px; color:#bad4f9; }\n.rt .rt-modal-status:empty { display:none; }\n.rt .rt-modal-content p { margin:0 0 10px; }\n.rt h2 { font-size:18px; margin:0 0 12px; }\n.rt h3 { font-size:17px; margin:0 0 8px; }\n.rt h4 { margin:12px 0 6px; }\n.rt .rt-id { display:block; color:#b1c9eb; font:11px Consolas,monospace; margin-bottom:8px; }\n.rt .rt-field { display:block; margin:0 0 12px; }\n.rt .rt-field > span { display:block; color:#becada; margin-bottom:4px; font-size:12px; }\n.rt .rt-modal-content input:not([type=checkbox]),.rt .rt-modal-content select,.rt .rt-modal-content textarea { font-size:16px; min-height:34px; }\n.rt textarea { min-height:64px; resize:vertical; }\n.rt .rt-full { width:100%; }\n.rt .rt-actions { display:flex; flex-wrap:wrap; gap:6px; }\n.rt .rt-divider { height:1px; background:#4b5566; margin:14px 0; }\n.rt .rt-muted { color:#b7c2d2; }\n.rt .rt-small { font-size:12px; }\n.rt .rt-note { background:#222f42; color:#c4d8f5; border:1px solid #576c8b; border-radius:4px; padding:8px; margin:10px 0; font-size:12px; }\n.rt .rt-empty { padding:24px 12px; text-align:center; color:#b9c4d4; }\n.rt pre { white-space:pre-wrap; overflow-wrap:anywhere; }\n.rt .rt-checkbox { display:flex; align-items:center; gap:8px; padding:6px 0; }\n.rt .rt-stats { display:flex; flex-wrap:wrap; gap:12px; margin:12px 0; }\n.rt .rt-stat strong { display:block; font-size:20px; }\n.rt .rt-log-entry { border-bottom:1px solid #505867; padding:10px 0; }\n.rt .rt-log-entry strong { display:block; }\n.rt code { word-break:break-word; }\n.rt .rt-sr { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }\n.rt-launch { position:fixed; top:12px; right:12px; z-index:2147483000; background:#26374e; border:1px solid #8daedb; border-radius:5px; padding:6px 10px; cursor:pointer; }\n@media(max-width:500px) {\n .rt .rt-row { gap:2px; padding:2px 3px; }\n .rt .rt-row-check { width:20px; }\n .rt .rt-row-id { display:none; }\n .rt .rt-row-value { width:48px; }\n .rt .rt-row-actions { gap:2px; }\n .rt .rt-quick { min-width:24px; padding:2px 3px; font-size:11px; }\n .rt .rt-select { font-size:12px; }\n .rt .rt-footer { gap:4px; }\n .rt .rt-status { font-size:10px; }\n .rt .rt-modal { padding:8px; }\n}\n@media(prefers-reduced-motion:reduce) { .rt * { scroll-behavior:auto !important; transition:none !important; } }\n/* Toolbox navigation and reliable constrained scroll areas, including old WebViews. */\n.rt .rt-home { display:none; flex-direction:column; min-height:0; height:100%; }\n.rt.rt-home-open .rt-home { display:flex; }\n.rt.rt-home-open .rt-panel > .rt-header,.rt.rt-home-open .rt-main,.rt.rt-home-open .rt-footer { display:none; }\n.rt .rt-home-header { display:flex; align-items:center; gap:10px; padding:6px 8px; border-bottom:1px solid #505764; flex-shrink:0; }\n.rt .rt-home-header h1 { font-size:16px; margin:0; }\n.rt .rt-home-header > span { margin-left:auto; font-size:11px; }\n.rt .rt-home-content { display:block; flex:1 1 auto; min-height:0; overflow-y:auto; padding:8px; }\n.rt .rt-home-content button { display:block; position:relative; width:100%; padding:9px 34px 9px 10px; text-align:left; margin-bottom:6px; white-space:normal; }\n.rt .rt-home-content strong { display:block; font-size:14px; font-weight:600; }\n.rt .rt-home-content span { display:block; font-size:12px; color:#bdc8d9; margin-top:2px; }\n.rt .rt-home-content b { position:absolute; right:12px; top:14px; font-size:18px; }\n.rt .rt-icon { width:20px; height:20px; flex:none; image-rendering:pixelated; }\n.rt .rt-modal-dialog > header,.rt .rt-modal-status { flex-shrink:0; }\n.rt .rt-modal-dialog > header { justify-content:flex-start; gap:6px; }\n.rt .rt-modal-content { flex:1 1 auto; }\n.rt .rt-list,.rt .rt-modal-content,.rt .rt-home-content { touch-action:none; overscroll-behavior:contain; }\n.rt .rt-list { user-select:none; }\n.rt .rt-coordinate-fields { display:flex; gap:8px; }\n.rt .rt-coordinate-fields > label { flex:1; min-width:0; }\n.rt-launch { right:auto; left:12px; left:max(12px,env(safe-area-inset-left,0px)); top:max(12px,env(safe-area-inset-top,0px)); }\n.rt { --rt-scrollbar-width:24px; --rt-font-size:13px; font-size:var(--rt-font-size); }\n.rt .rt-select { font-size:var(--rt-font-size); }\n.rt .rt-list,.rt .rt-home-content,.rt .rt-modal-content { padding-right:calc(var(--rt-scrollbar-width) + 8px); scrollbar-width:none; }\n.rt .rt-list::-webkit-scrollbar,.rt .rt-home-content::-webkit-scrollbar,.rt .rt-modal-content::-webkit-scrollbar { display:none; }\n.rt textarea::-webkit-scrollbar { width:18px; height:18px; }\n.rt textarea::-webkit-scrollbar-track { background:#181d25; }\n.rt textarea::-webkit-scrollbar-thumb { background:#9eb3ce; border:3px solid #181d25; border-radius:8px; }\n.rt .rt-scrollbar { position:fixed; z-index:4; background:#11161e; border-left:1px solid #64748b; touch-action:none; user-select:none; cursor:pointer; }\n.rt .rt-scroll-thumb { width:100%; min-height:24px; border:4px solid #11161e; border-radius:9px; background:#9eb3ce; cursor:grab; }\n.rt .rt-scrollbar[aria-disabled=true] .rt-scroll-thumb { background:#394353; }\n.rt .rt-scrollbar:focus-visible { outline:2px solid #bdd8ff; outline-offset:-2px; }\n.rt .rt-toggle { display:flex; align-items:center; gap:12px; min-height:40px; cursor:pointer; position:relative; }\n.rt .rt-toggle > span:first-child { flex:1; }\n.rt .rt-toggle input { position:absolute; right:0; width:48px; height:30px; opacity:0; margin:0; z-index:1; cursor:pointer; }\n.rt .rt-toggle-track { display:block; width:48px; height:28px; flex:none; border-radius:20px; background:#495363; border:1px solid #7a879c; padding:3px; }\n.rt .rt-toggle-track::after { content:''; display:block; width:20px; height:20px; border-radius:50%; background:#f0f3f9; }\n.rt .rt-toggle input:checked + .rt-toggle-track { background:#4272ac; border-color:#a0c5f4; }\n.rt .rt-toggle input:checked + .rt-toggle-track::after { transform:translateX(19px); }\n.rt .rt-toggle input:focus-visible + .rt-toggle-track { outline:2px solid #bdd8ff; outline-offset:3px; }\n.rt .rt-stat-quick { margin:-5px 0 14px; }\n.rt .rt-stat-quick button { flex:1; }\n.rt .rt-import { margin-top:12px; }\n\n.rt .rt-home-content button[role=\"switch\"] { padding-right:72px; }\n.rt .rt-home-content .rt-toggle-track { top:50%; margin-top:-14px; }\n.rt .rt-home-content [aria-checked=\"true\"] .rt-toggle-track { background:#4272ac; border-color:#a0c5f4; }\n.rt .rt-home-content [aria-checked=\"true\"] .rt-toggle-track::after { transform:translateX(19px); }\n";
+var TOOLKIT_CSS = "/* Compact full-screen editor. No width-dependent sidebar or oversized touch theme. */\n.rt,.rt-launch { box-sizing:border-box; font:13px/1.4 system-ui,'Segoe UI',Arial,sans-serif; color:#eef0f4; text-align:left; letter-spacing:normal; }\n.rt *,.rt *::before,.rt *::after { box-sizing:border-box; }\n.rt { position:fixed; z-index:2147483001; inset:0; display:flex; padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px); background:#181a1f; user-select:text; }\n.rt[hidden],.rt [hidden],.rt-launch[hidden] { display:none !important; }\n.rt header,.rt main,.rt footer,.rt section,.rt aside,.rt nav { position:static; top:auto; right:auto; bottom:auto; left:auto; float:none; margin:0; }\n.rt button,.rt input,.rt select,.rt textarea { font:inherit; color:inherit; margin:0; touch-action:manipulation; }\n.rt button { cursor:pointer; border:1px solid #4f5663; border-radius:4px; background:#292d35; padding:4px 8px; min-height:30px; line-height:1.2; white-space:nowrap; }\n.rt button:hover { background:#363d49; }\n.rt button:disabled { opacity:.38; cursor:default; }\n.rt button:focus-visible,.rt input:focus-visible,.rt select:focus-visible,.rt textarea:focus-visible,.rt-launch:focus-visible { outline:2px solid #a9cafa; outline-offset:-2px; }\n.rt button[aria-pressed=true] { color:#b7d3fb; border-color:#799dcd; background:#2a3b53; }\n.rt .rt-primary { background:#91b8ee; color:#10223a; border-color:#91b8ee; font-weight:600; }\n.rt .rt-primary:hover { background:#b2cff7; color:#10223a; }\n.rt input:not([type=checkbox]),.rt select,.rt textarea { width:100%; min-width:0; border:1px solid #535c6c; border-radius:4px; background:#15171c; padding:4px 7px; min-height:30px; }\n.rt input::placeholder { color:#a9b2c1; opacity:1; }\n.rt input[type=checkbox] { width:16px; height:16px; accent-color:#91b8ee; flex-shrink:0; cursor:pointer; }\n.rt .rt-panel { display:flex; flex-direction:column; width:100%; height:100%; min-height:0; min-width:0; overflow:hidden; background:#1e2127; }\n.rt .rt-header { flex-shrink:0; padding:5px 8px; border-bottom:1px solid #505764; background:#191c22; }\n.rt .rt-search-line { display:flex; gap:6px; align-items:center; }\n.rt .rt-search { flex:1; min-width:0; }\n.rt .rt-close { min-width:32px; width:32px; padding:0; flex-shrink:0; }\n.rt .rt-filter-line { display:flex; gap:6px; margin-top:5px; }\n.rt .rt-filter-line label { flex:1; min-width:0; }\n.rt .rt-filter-line select { padding-right:2px; }\n.rt .rt-main { display:flex; flex-direction:column; min-height:0; min-width:0; flex:1; overflow:hidden; }\n.rt .rt-bulkbar { display:flex; justify-content:space-between; gap:6px; align-items:center; min-height:30px; padding:0 6px; border-bottom:1px solid #444c59; background:#252932; font-size:11px; flex-shrink:0; }\n.rt .rt-page-check { display:flex; align-items:center; gap:6px; min-height:30px; cursor:pointer; }\n.rt #rt-bulk-actions { display:flex; gap:3px; }\n.rt #rt-bulk-actions button { min-height:26px; padding:3px 6px; font-size:11px; }\n.rt .rt-list { flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; touch-action:pan-y; list-style:none; margin:0; padding:0; scrollbar-width:thin; }\n.rt .rt-row { display:flex; align-items:center; gap:4px; height:36px; min-height:36px; padding:2px 6px; border-bottom:1px solid #383f4b; }\n.rt .rt-row:nth-child(even) { background:#23272f; }\n.rt .rt-row.rt-frozen { box-shadow:inset 2px 0 #91b8ee; }\n.rt .rt-row-check { display:flex; align-items:center; justify-content:center; width:24px; height:32px; flex-shrink:0; cursor:pointer; }\n.rt .rt-select { display:flex; align-items:center; gap:6px; flex:1; min-width:0; text-align:left; border:0; background:transparent; padding:0 3px; height:30px; }\n.rt .rt-select:hover { background:transparent; }\n.rt .rt-row-id { color:#a8b3c4; font-size:10px; flex-shrink:0; max-width:64px; overflow:hidden; text-overflow:ellipsis; }\n.rt .rt-row-title { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }\n.rt .rt-row-value { font:12px/1.4 Consolas,monospace; flex-shrink:0; width:72px; padding:2px 4px; border:1px solid #4b5565; border-radius:3px; background:#161b23; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right; }\n.rt .rt-row-actions { display:flex; align-items:center; gap:3px; flex-shrink:0; }\n.rt .rt-quick { min-width:28px; min-height:28px; height:28px; padding:2px 4px; font-size:12px; }\n.rt .rt-pagination { display:flex; align-items:center; justify-content:space-between; gap:8px; height:30px; padding:2px 8px; border-top:1px solid #4c5462; background:#191d24; font-size:11px; flex-shrink:0; }\n.rt .rt-pagination > div { display:flex; align-items:center; gap:4px; }\n.rt .rt-pagination button { min-height:24px; height:24px; min-width:28px; padding:0 5px; font-size:17px; }\n.rt .rt-pagination input { width:42px; min-height:24px; height:24px; padding:1px 2px; text-align:center; font-size:11px; -moz-appearance:textfield; }\n.rt .rt-pagination input::-webkit-inner-spin-button { -webkit-appearance:none; }\n.rt .rt-footer { display:flex; align-items:center; gap:8px; padding:4px 8px; min-height:38px; background:#16191f; border-top:1px solid #505867; flex-shrink:0; }\n.rt .rt-footer button { font-size:12px; }\n.rt .rt-status { flex:1; min-width:0; font-size:11px; color:#bdcce1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }\n.rt .rt-error { color:#ffbda9; }\n.rt .rt-modal { position:absolute; inset:0; z-index:2; display:flex; align-items:center; justify-content:center; padding:12px; background:#080b10c9; }\n.rt .rt-modal-dialog { width:480px; max-width:100%; max-height:100%; min-height:0; display:flex; flex-direction:column; border:1px solid #73839d; border-radius:8px; background:#242932; box-shadow:0 16px 48px #0009; overflow:hidden; }\n.rt .rt-modal-dialog > header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 12px; border-bottom:1px solid #505c70; background:#1b2029; }\n.rt .rt-modal-dialog > header h2 { margin:0; font-size:15px; font-weight:600; }\n.rt .rt-modal-content { overflow-y:auto; min-height:0; padding:12px; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; overflow-wrap:anywhere; }\n.rt .rt-modal-status { padding:0 12px 8px; font-size:12px; color:#bad4f9; }\n.rt .rt-modal-status:empty { display:none; }\n.rt .rt-modal-content p { margin:0 0 10px; }\n.rt h2 { font-size:18px; margin:0 0 12px; }\n.rt h3 { font-size:17px; margin:0 0 8px; }\n.rt h4 { margin:12px 0 6px; }\n.rt .rt-id { display:block; color:#b1c9eb; font:11px Consolas,monospace; margin-bottom:8px; }\n.rt .rt-field { display:block; margin:0 0 12px; }\n.rt .rt-field > span { display:block; color:#becada; margin-bottom:4px; font-size:12px; }\n.rt .rt-modal-content input:not([type=checkbox]),.rt .rt-modal-content select,.rt .rt-modal-content textarea { font-size:16px; min-height:34px; }\n.rt textarea { min-height:64px; resize:vertical; }\n.rt .rt-full { width:100%; }\n.rt .rt-actions { display:flex; flex-wrap:wrap; gap:6px; }\n.rt .rt-divider { height:1px; background:#4b5566; margin:14px 0; }\n.rt .rt-muted { color:#b7c2d2; }\n.rt .rt-small { font-size:12px; }\n.rt .rt-note { background:#222f42; color:#c4d8f5; border:1px solid #576c8b; border-radius:4px; padding:8px; margin:10px 0; font-size:12px; }\n.rt .rt-empty { padding:24px 12px; text-align:center; color:#b9c4d4; }\n.rt pre { white-space:pre-wrap; overflow-wrap:anywhere; }\n.rt .rt-checkbox { display:flex; align-items:center; gap:8px; padding:6px 0; }\n.rt .rt-stats { display:flex; flex-wrap:wrap; gap:12px; margin:12px 0; }\n.rt .rt-stat strong { display:block; font-size:20px; }\n.rt .rt-log-entry { border-bottom:1px solid #505867; padding:10px 0; }\n.rt .rt-log-entry strong { display:block; }\n.rt code { word-break:break-word; }\n.rt .rt-sr { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }\n.rt-launch { position:fixed; top:12px; right:12px; z-index:2147483000; background:#26374e; border:1px solid #8daedb; border-radius:5px; padding:6px 10px; cursor:pointer; }\n@media(max-width:500px) {\n .rt .rt-row { gap:2px; padding:2px 3px; }\n .rt .rt-row-check { width:20px; }\n .rt .rt-row-id { display:none; }\n .rt .rt-row-value { width:48px; }\n .rt .rt-row-actions { gap:2px; }\n .rt .rt-quick { min-width:24px; padding:2px 3px; font-size:11px; }\n .rt .rt-select { font-size:12px; }\n .rt .rt-footer { gap:4px; }\n .rt .rt-status { font-size:10px; }\n .rt .rt-modal { padding:8px; }\n}\n@media(prefers-reduced-motion:reduce) { .rt * { scroll-behavior:auto !important; transition:none !important; } }\n/* Toolbox navigation and reliable constrained scroll areas, including old WebViews. */\n.rt .rt-home { display:none; flex-direction:column; min-height:0; height:100%; }\n.rt.rt-home-open .rt-home { display:flex; }\n.rt.rt-home-open .rt-panel > .rt-header,.rt.rt-home-open .rt-main,.rt.rt-home-open .rt-footer { display:none; }\n.rt .rt-home-header { display:flex; align-items:center; gap:10px; padding:6px 8px; border-bottom:1px solid #505764; flex-shrink:0; }\n.rt .rt-home-header h1 { font-size:16px; margin:0; }\n.rt .rt-home-header > span { margin-left:auto; font-size:11px; }\n.rt .rt-home-content { display:block; flex:1 1 auto; min-height:0; overflow-y:auto; padding:8px; }\n.rt .rt-home-content button { display:block; position:relative; width:100%; padding:9px 34px 9px 10px; text-align:left; margin-bottom:6px; white-space:normal; }\n.rt .rt-home-content strong { display:block; font-size:14px; font-weight:600; }\n.rt .rt-home-content span { display:block; font-size:12px; color:#bdc8d9; margin-top:2px; }\n.rt .rt-home-content b { position:absolute; right:12px; top:14px; font-size:18px; }\n.rt .rt-icon { width:20px; height:20px; flex:none; image-rendering:pixelated; }\n.rt .rt-modal-dialog > header,.rt .rt-modal-status { flex-shrink:0; }\n.rt .rt-modal-dialog > header { justify-content:flex-start; gap:6px; }\n.rt .rt-modal-content { flex:1 1 auto; }\n.rt .rt-list,.rt .rt-modal-content,.rt .rt-home-content { touch-action:none; overscroll-behavior:contain; }\n.rt .rt-list { user-select:none; }\n.rt .rt-coordinate-fields { display:flex; gap:8px; }\n.rt .rt-coordinate-fields > label { flex:1; min-width:0; }\n.rt-launch { right:auto; left:12px; left:max(12px,env(safe-area-inset-left,0px)); top:max(12px,env(safe-area-inset-top,0px)); }\n.rt { --rt-scrollbar-width:24px; --rt-font-size:13px; font-size:var(--rt-font-size); }\n.rt .rt-select { font-size:var(--rt-font-size); }\n.rt .rt-list,.rt .rt-home-content,.rt .rt-modal-content { padding-right:calc(var(--rt-scrollbar-width) + 8px); scrollbar-width:none; }\n.rt .rt-list::-webkit-scrollbar,.rt .rt-home-content::-webkit-scrollbar,.rt .rt-modal-content::-webkit-scrollbar { display:none; }\n.rt textarea::-webkit-scrollbar { width:18px; height:18px; }\n.rt textarea::-webkit-scrollbar-track { background:#181d25; }\n.rt textarea::-webkit-scrollbar-thumb { background:#9eb3ce; border:3px solid #181d25; border-radius:8px; }\n.rt .rt-scrollbar { position:fixed; z-index:4; background:#11161e; border-left:1px solid #64748b; touch-action:none; user-select:none; cursor:pointer; }\n.rt .rt-scroll-thumb { width:100%; min-height:24px; border:4px solid #11161e; border-radius:9px; background:#9eb3ce; cursor:grab; }\n.rt .rt-scrollbar[aria-disabled=true] .rt-scroll-thumb { background:#394353; }\n.rt .rt-scrollbar:focus-visible { outline:2px solid #bdd8ff; outline-offset:-2px; }\n.rt .rt-toggle { display:flex; align-items:center; gap:12px; min-height:40px; cursor:pointer; position:relative; }\n.rt .rt-toggle > span:first-child { flex:1; }\n.rt .rt-toggle input { position:absolute; right:0; width:48px; height:30px; opacity:0; margin:0; z-index:1; cursor:pointer; }\n.rt .rt-toggle-track { display:block; width:48px; height:28px; flex:none; border-radius:20px; background:#495363; border:1px solid #7a879c; padding:3px; }\n.rt .rt-toggle-track::after { content:''; display:block; width:20px; height:20px; border-radius:50%; background:#f0f3f9; }\n.rt .rt-toggle input:checked + .rt-toggle-track { background:#4272ac; border-color:#a0c5f4; }\n.rt .rt-toggle input:checked + .rt-toggle-track::after { transform:translateX(19px); }\n.rt .rt-toggle input:focus-visible + .rt-toggle-track { outline:2px solid #bdd8ff; outline-offset:3px; }\n.rt .rt-stat-quick { margin:-5px 0 14px; }\n.rt .rt-stat-quick button { flex:1; }\n.rt .rt-import { margin-top:12px; }\n\n.rt .rt-home-content button[role=\"switch\"] { padding-right:72px; }\n.rt .rt-home-content .rt-toggle-track { top:50%; margin-top:-14px; }\n.rt .rt-home-content [aria-checked=\"true\"] .rt-toggle-track { background:#4272ac; border-color:#a0c5f4; }\n.rt .rt-home-content [aria-checked=\"true\"] .rt-toggle-track::after { transform:translateX(19px); }\n\n.rt .rt-bottom-close { position:absolute; bottom:4px; left:4px; z-index:6; width:32px; height:30px; min-height:30px; text-align:center; padding:0; background:#26374e; }\n.rt .rt-place-row { display:flex; gap:6px; margin:6px 0; }\n.rt .rt-place-row > button:first-child { flex:1; min-width:0; }\n.rt .rt-place-row small { display:block; color:#bdc8d8; }\n.rt #rt-places { margin:12px 0; }\n\n.rt.rt-close-recall .rt-footer { padding-left:42px; }\n.rt.rt-close-recall .rt-modal { padding-bottom:42px; }\n.rt.rt-close-recall .rt-home-content { padding-bottom:42px; }\n";
 var toolkitEnglish = {
+    'Nom de l’emplacement':'Location name','Enregistrer l’emplacement actuel':'Save current location','Dernier emplacement':'Last location','Emplacement enregistré.':'Location saved.',
+    'Position horizontale':'Horizontal position','Position verticale':'Vertical position','Fermeture en bas à gauche':'Close button at bottom left',
+    'Aucune position sûre sur cette carte.':'No safe position on this map.','Passages de la carte indisponibles.':'Map passage data unavailable.',
+    'Descendez du véhicule avant de vous téléporter.':'Leave the vehicle before teleporting.','Téléportation en cours.':'Teleport in progress.',
+    'Nom requis.':'Name required.','100 emplacements maximum.':'100 saved locations maximum.',
+    'Recherche sûre trop étendue. Choisissez une autre position.':'Safe search limit reached. Choose another position.',
     'Défilement':'Scroll','Paramètres':'Settings','Langue, affichage et raccourcis':'Language, display and shortcuts','Langue':'Language','Français':'French','Anglais':'English',
     'Taille du texte':'Text size','Barre de défilement':'Scrollbar width','Lignes par page':'Rows per page','Raccourci':'Shortcut','Bouton Toolbox':'Toolbox button',
     'Éditeurs':'Editors','Variables, objets, armes, armures…':'Variables, items, weapons, armor…','Traductions':'Translations','Noms anglais · tout traduire et reprendre':'English names · translate all and resume',
@@ -726,8 +836,9 @@ function settingsSelect(label,key,options) {
 function renderSettings() {
     openModal('settings','Paramètres');
     $('.rt-modal-content').innerHTML = settingsSelect('Langue','language',[['fr','Français'],['en','English']])+settingsSelect('Taille du texte','fontSize',[[12,'12 px'],[13,'13 px'],[15,'15 px'],[17,'17 px']])+settingsSelect('Barre de défilement','scrollbarWidth',[[18,'18 px'],[24,'24 px'],[32,'32 px']])+settingsSelect('Lignes par page','pageSize',[[20,20],[40,40],[60,60],[80,80]])+settingsSelect('Raccourci','hotkey',[['F6','F6'],['F7','F7'],['F10','F10']])+'<label class="rt-toggle"><span>Bouton Toolbox</span><input type="checkbox" role="switch" data-setting="showButton"><span class="rt-toggle-track" aria-hidden="true"></span></label>';
+    $('.rt-modal-content').innerHTML += '<label class="rt-field"><span>Position horizontale</span><input type="range" min="0" max="100" step="1" data-setting="buttonX"></label><label class="rt-field"><span>Position verticale</span><input type="range" min="0" max="100" step="1" data-setting="buttonY"></label><label class="rt-toggle"><span>Fermeture en bas à gauche</span><input type="checkbox" role="switch" data-setting="bottomClose"><span class="rt-toggle-track" aria-hidden="true"></span></label>';
     var settings=runtime.prefs.settings;
-    Array.prototype.forEach.call(root.querySelectorAll('[data-setting]'),function(el){var key=el.getAttribute('data-setting');if(key==='showButton')el.checked=settings[key]&&!!launch;else el.value=settings[key]||(key==='pageSize'?pageSize:hotkey);});
+    Array.prototype.forEach.call(root.querySelectorAll('[data-setting]'),function(el){var key=el.getAttribute('data-setting');if(el.type==='checkbox')el.checked=!!settings[key];else el.value=(key==='buttonX'||key==='buttonY')?settings[key]:settings[key]||(key==='pageSize'?pageSize:hotkey);});
 }
 function applySettings() {
     var settings=runtime.prefs.settings;
@@ -735,18 +846,28 @@ function applySettings() {
     root.lang=settings.language;
     root.style.setProperty('--rt-font-size',settings.fontSize+'px');root.style.setProperty('--rt-scrollbar-width',settings.scrollbarWidth+'px');
     if(launch){launch.setAttribute('aria-label',(settings.language==='en'?'Open Toolbox':'Ouvrir Toolbox')+' ('+hotkey+')');launch.textContent='Toolbox · '+hotkey;launch.hidden=opened||!settings.showButton||!allowed();}
+    root.classList.toggle('rt-close-recall',settings.bottomClose);
+    positionLauncher(); var recall=$('.rt-bottom-close'); if(recall)recall.hidden=!settings.bottomClose;
     localizeToolkit();fitToolboxModal();if(typeof refreshToolkitScroll==='function')refreshToolkitScroll();
 }
 function installSettings() {
     root.addEventListener('change',function(event){
         var key=event.target.getAttribute('data-setting');if(!key)return;
         var value=event.target.type==='checkbox'?event.target.checked:event.target.value;
-        if(['fontSize','scrollbarWidth','pageSize'].indexOf(key)>=0)value=Number(value);
+        if(['fontSize','scrollbarWidth','pageSize','buttonX','buttonY'].indexOf(key)>=0)value=Number(value);
         runtime.prefs.settings[key]=value;runtime.savePrefs();if(key==='showButton'&&value&&!launch)mountLauncher(true);applySettings();
         if(key==='pageSize')renderList();
         if(runtime.storageWarning())say('Stockage local indisponible : exportez vos traductions pour les conserver.',true);
     });
     if(g.MutationObserver)new g.MutationObserver(localizeToolkit).observe(root,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['aria-label','placeholder','title','label']});
+}
+
+function positionLauncher() {
+    if(!launch||!runtime)return;
+    var s=runtime.prefs.settings, v=g.visualViewport, w=v?v.width:g.innerWidth, h=v?v.height:g.innerHeight;
+    launch.style.right='auto';launch.style.bottom='auto';
+    launch.style.left=((v?v.offsetLeft:0)+8+Math.max(0,w-(launch.offsetWidth||140)-16)*s.buttonX/100)+'px';
+    launch.style.top=((v?v.offsetTop:0)+8+Math.max(0,h-(launch.offsetHeight||34)-16)*s.buttonY/100)+'px';
 }
 
 /* Manual pan survives RPG Maker/JoiPlay cancelling the browser's native gesture. */
@@ -890,6 +1011,7 @@ function allowed() {
 function mobileLayout() { return g.matchMedia && g.matchMedia('(max-width: 800px), (max-width: 950px) and (max-height: 500px)').matches; }
 function touchInput() { return g.matchMedia && g.matchMedia('(pointer: coarse)').matches; }
 function syncViewport() {
+    positionLauncher();
     if (!opened || !root) return;
     var v = g.visualViewport || { height:g.innerHeight, width:g.innerWidth, offsetTop:0, offsetLeft:0 };
     root.style.height = v.height + 'px'; root.style.width = v.width + 'px';
@@ -910,6 +1032,7 @@ function buildRoot() {
     $('[data-action="clear-selection"]').setAttribute('aria-label', 'Effacer la sélection');
     $('[data-action="prev"]').setAttribute('aria-label', 'Page précédente');
     $('[data-action="next"]').setAttribute('aria-label', 'Page suivante');
+    var recall=document.createElement('button');recall.type='button';recall.className='rt-bottom-close';recall.textContent='✕';recall.setAttribute('aria-label','Fermer le Toolkit');recall.hidden=true;recall.addEventListener('click',function(event){event.stopPropagation();closeToolkit();});root.appendChild(recall);
     document.body.appendChild(root);
     installToolboxUI();
     installToolkitScroll();
@@ -1244,7 +1367,7 @@ function openToolkit() {
     if (!allowed()) return false;
     try {
         initializeRuntime();
-        if (!gameTools) gameTools = createToolkitTools(g);
+        if (!gameTools) gameTools = createToolkitTools(g, runtime);
         runtime.refresh(); selected = null; checked = {}; 
         buildRoot(); previousFocus = document.activeElement; openScene = g.SceneManager._scene;
         openVariables = g.$gameVariables; opened = true; root.hidden = false; if (launch) launch.hidden = true;
@@ -1267,7 +1390,7 @@ function closeToolkit() {
     if (previousFocus && document.contains(previousFocus)) previousFocus.focus();
 }
 function toggleToolkit() { return opened ? closeToolkit() : openToolkit(); }
-g.RPGMToolkit = { version: '1.6.0', open: openToolkit, close: closeToolkit, toggle: toggleToolkit, isOpen: function() { return opened; } };
+g.RPGMToolkit = { version: '1.7.0', open: openToolkit, close: closeToolkit, toggle: toggleToolkit, isOpen: function() { return opened; } };
 var heldCloseKey = null;
 g.addEventListener('keydown', function(event) {
     var key = event.key || ({ 117: 'F6', 118: 'F7', 121: 'F10', 27: 'Escape' }[event.keyCode]);
@@ -1280,6 +1403,7 @@ g.addEventListener('keydown', function(event) {
     if ((event.ctrlKey || event.metaKey) && (key === 'f' || key === 'F')) { event.preventDefault(); event.stopImmediatePropagation(); if (!modalMode && $('#rt-search')) $('#rt-search').focus(); return; }
     if (key === 'Tab') {
         var focusables = Array.prototype.slice.call((modalMode ? $('.rt-modal') : $('.rt-panel')).querySelectorAll('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href],[role=scrollbar]')).filter(function(el) { return el.offsetWidth || el.offsetHeight; });
+        var recall=$('.rt-bottom-close');if(recall&&!recall.hidden)focusables.push(recall);
         if (!focusables.length) return;
         var first = focusables[0], last = focusables[focusables.length - 1];
         if (event.shiftKey && (document.activeElement === first || focusables.indexOf(document.activeElement) < 0)) { event.preventDefault(); last.focus(); }
@@ -1304,7 +1428,7 @@ var originalUpdateScene = g.SceneManager.updateScene;
 g.SceneManager.updateScene = function() {
     if (!runtime && allowed()) initializeRuntime();
     if (opened && (this._scene !== openScene || g.$gameVariables !== openVariables || this.isSceneChanging())) closeToolkit();
-    if (launch) { var hidden = opened || (runtime && !runtime.prefs.settings.showButton) || !allowed(); if (launch.hidden !== hidden) launch.hidden = hidden; }
+    if (launch) { var hidden = opened || (runtime && !runtime.prefs.settings.showButton) || !allowed(); if (launch.hidden !== hidden) { launch.hidden = hidden; if(!hidden)positionLauncher(); } }
     if (gameTools) gameTools.tick();
     if (runtime) runtime.enforceFrozen();
     if (!opened) { var result = originalUpdateScene.apply(this, arguments); if (gameTools) gameTools.tick(); if (runtime) runtime.enforceFrozen(); return result; }
@@ -1389,10 +1513,24 @@ function toolPage(mode) {
     openModal(mode,titles[mode]); var html = '';
     if (mode === 'resources') html = '<form data-form="tool-resources">'+toolActorSelector(true)+'<p id="rt-tool-summary" class="rt-muted"></p>'+field('HP','rt-tool-hp',0,'number','min="0" step="1" required')+quickActions('hp')+field('MP','rt-tool-mp',0,'number','min="0" step="1" required')+quickActions('mp')+field('TP','rt-tool-tp',0,'number','min="0" step="1" required')+'<div class="rt-actions"><button type="submit" class="rt-primary">Appliquer</button>'+button('Tout restaurer','tool-heal')+'</div></form>';
     if (mode === 'stats') html = '<form data-form="tool-stats">'+toolActorSelector(false)+'<label class="rt-field"><span>Statistique</span><select id="rt-tool-param"><option value="level">Niveau</option><option value="exp">Expérience totale</option>'+['HP max','MP max','Attaque','Défense','Attaque magique','Défense magique','Agilité','Chance'].map(function(n,i){return '<option value="'+i+'">Bonus · '+n+'</option>';}).join('')+'</select></label><p id="rt-tool-summary" class="rt-muted"></p>'+field('Valeur','rt-tool-value',0,'number','step="1" required')+quickActions('stat')+'<button type="submit" class="rt-primary">Appliquer</button></form>';
-    if (mode === 'teleport') html = '<form data-form="tool-teleport">'+field('Rechercher une carte · nom ou ID','rt-map-query','','search','autocomplete="off"')+'<label class="rt-field"><span>Carte</span><select id="rt-tool-map"></select></label><p id="rt-map-summary" role="status"></p><div class="rt-coordinate-fields">'+field('X','rt-map-x',0,'number','min="0" step="1" required')+field('Y','rt-map-y',0,'number','min="0" step="1" required')+'</div><label class="rt-field"><span>Direction</span><select id="rt-map-direction"><option value="0">Conserver</option><option value="2">Bas</option><option value="4">Gauche</option><option value="6">Droite</option><option value="8">Haut</option></select></label><button id="rt-map-go" type="submit" class="rt-primary" disabled>Se téléporter</button></form>';
+    if (mode === 'teleport') html = '<label class="rt-toggle"><span>Safe Teleport</span><input type="checkbox" role="switch" data-setting="safeTeleport"'+(runtime.prefs.settings.safeTeleport?' checked':'')+'><span class="rt-toggle-track" aria-hidden="true"></span></label><form data-form="tool-save-place">'+field('Nom de l’emplacement','rt-place-name','','text','maxlength="80" required')+'<button type="submit">Enregistrer l’emplacement actuel</button></form><div id="rt-places"></div><form data-form="tool-teleport">'+field('Rechercher une carte · nom ou ID','rt-map-query','','search','autocomplete="off"')+'<label class="rt-field"><span>Carte</span><select id="rt-tool-map"></select></label><p id="rt-map-summary" role="status"></p><div class="rt-coordinate-fields">'+field('X','rt-map-x',0,'number','min="0" step="1" required')+field('Y','rt-map-y',0,'number','min="0" step="1" required')+'</div><label class="rt-field"><span>Direction</span><select id="rt-map-direction"><option value="0">Conserver</option><option value="2">Bas</option><option value="4">Gauche</option><option value="6">Droite</option><option value="8">Haut</option></select></label><button id="rt-map-go" type="submit" class="rt-primary" disabled>Se téléporter</button></form>';
     $('.rt-modal-content').innerHTML = html;
     if (mode === 'resources' || mode === 'stats') updateToolValues();
-    if (mode === 'teleport') { renderToolMaps(''); $('#rt-tool-map').value = String(g.$gameMap.mapId()); if (!$('#rt-tool-map').value) $('#rt-tool-map').selectedIndex = 0; loadToolMap(); }
+    if (mode === 'teleport') { renderPlaces(); renderToolMaps(''); $('#rt-tool-map').value = String(g.$gameMap.mapId()); if (!$('#rt-tool-map').value) $('#rt-tool-map').selectedIndex = 0; loadToolMap(); }
+}
+function renderPlaces() {
+    var last=gameTools.travel.last(), places=gameTools.travel.places();
+    function row(p,index,label) { return '<div class="rt-place-row"><button type="button" data-action="tool-place-go" data-place="'+index+'"><span data-game-text>'+esc(label||p.name)+'</span><small>#'+p.mapId+' · '+p.x+', '+p.y+'</small></button>'+(index==='last'?'':'<button type="button" data-action="tool-place-delete" data-place="'+index+'" aria-label="Supprimer">×</button>')+'</div>'; }
+    $('#rt-places').innerHTML=(last?row(last,'last',runtime.prefs.settings.language==='en'?'Last location':'Dernier emplacement'):'')+places.map(function(p,i){return row(p,i);}).join('');
+}
+function visitPlace(index) {
+    var p=index==='last'?gameTools.travel.last():gameTools.travel.places()[Number(index)], token=++toolboxMapToken;
+    if(!p)return;
+    say('Lecture de la carte…');
+    gameTools.loadMap(p.mapId).then(function(map){
+        if(!opened||modalMode!=='teleport'||token!==toolboxMapToken)return;
+        guarded(function(){gameTools.teleport(map,p.x,p.y,p.direction);closeToolkit();});
+    }).catch(function(e){if(opened&&modalMode==='teleport'&&token===toolboxMapToken)say(e.message,true);});
 }
 function updateToolValues() {
     var id = $('#rt-tool-actor').value, actors = modalMode === 'resources' ? gameTools.resourceTargets(id) : gameTools.members().filter(function(a){return String(a.actorId()) === id;}), a = actors[0];
@@ -1432,6 +1570,8 @@ function toolboxAction(action, node) {
     else if (mode === 'god' || mode === 'noclip') { if (mode === 'god') gameTools.setGod(!gameTools.state().god); else gameTools.setNoclip(!gameTools.state().noclip); node.setAttribute('aria-checked', String(gameTools.state()[mode])); }
     else if (mode === 'home') showToolboxHome();
     else if (mode === 'editors') { toolboxHome = false; root.classList.remove('rt-home-open'); render(); $('.rt-panel').focus(); }
+    else if (mode === 'place-go') visitPlace(node.getAttribute('data-place'));
+    else if (mode === 'place-delete') { gameTools.travel.forget(Number(node.getAttribute('data-place'))); renderPlaces(); }
     else if (mode === 'settings') renderSettings();
     else if (mode === 'quick') { var param=node.getAttribute('data-param'), adjust=node.getAttribute('data-adjust'), target=$('#rt-tool-actor').value; if (param === 'stat') gameTools.adjustStat(target,$('#rt-tool-param').value,adjust); else gameTools.adjustResource(target,param,adjust); dirty=true; updateToolValues(); }
     else if (mode === 'translations') { if (!translator.busy()) { translationScope = 'all'; pendingTranslations = []; } openModal('translations','Traductions'); renderTranslations(); }
@@ -1442,6 +1582,7 @@ function toolboxAction(action, node) {
     return true;
 }
 function toolboxSubmit(form) {
+    if(form==='tool-save-place'){gameTools.travel.remember($('#rt-place-name').value);$('#rt-place-name').value='';renderPlaces();say('Emplacement enregistré.');return true;}
     if (form === 'tool-resources') { gameTools.resources($('#rt-tool-actor').value,$('#rt-tool-hp').value,$('#rt-tool-mp').value,$('#rt-tool-tp').value,false); dirty=true;updateToolValues();say('Ressources mises à jour.');return true; }
     if (form === 'tool-stats') { gameTools.stat($('#rt-tool-actor').value,$('#rt-tool-param').value,$('#rt-tool-value').value);dirty=true;updateToolValues();say('Statistique mise à jour.');return true; }
     if (form === 'tool-teleport') { gameTools.teleport(toolboxMap,$('#rt-map-x').value,$('#rt-map-y').value,$('#rt-map-direction').value);closeToolkit();return true; }

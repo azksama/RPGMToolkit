@@ -1,5 +1,13 @@
 # Versions
 
+## 1.7.0 — Safe Teleport et emplacements
+
+- Safe Teleport activé par défaut : recherche de la case accessible la plus proche avec une sortie praticable dans les deux sens ; refus si aucune case sûre n’est trouvée.
+- Évite les événements, véhicules et sols dommageables reconnus par le moteur ; ne se fie pas à No Clip.
+- Jusqu’à 100 emplacements nommés persistants par jeu et retour au dernier emplacement après un transfert réussi.
+- Position horizontale/verticale du bouton Toolbox et bouton de fermeture facultatif en bas à gauche.
+- Fonctionnalités disponibles dans les variantes MV/MZ et XP/VX/VX Ace.
+
 ## 1.6.0 — Compatibilité des moteurs
 
 - Détection et installation XP, VX, VX Ace, MV 1.x et MZ 1.x, en ZIP ou en bibliothèque de dossiers Android.

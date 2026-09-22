@@ -142,3 +142,13 @@
 .rt .rt-home-content .rt-toggle-track { top:50%; margin-top:-14px; }
 .rt .rt-home-content [aria-checked="true"] .rt-toggle-track { background:#4272ac; border-color:#a0c5f4; }
 .rt .rt-home-content [aria-checked="true"] .rt-toggle-track::after { transform:translateX(19px); }
+
+.rt .rt-bottom-close { position:absolute; bottom:4px; left:4px; z-index:6; width:32px; height:30px; min-height:30px; text-align:center; padding:0; background:#26374e; }
+.rt .rt-place-row { display:flex; gap:6px; margin:6px 0; }
+.rt .rt-place-row > button:first-child { flex:1; min-width:0; }
+.rt .rt-place-row small { display:block; color:#bdc8d8; }
+.rt #rt-places { margin:12px 0; }
+
+.rt.rt-close-recall .rt-footer { padding-left:42px; }
+.rt.rt-close-recall .rt-modal { padding-bottom:42px; }
+.rt.rt-close-recall .rt-home-content { padding-bottom:42px; }

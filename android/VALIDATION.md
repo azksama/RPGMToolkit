@@ -1,3 +1,14 @@
+# Validation 1.7.0
+
+- 47 tests JavaScript : passages bloqués, cases isolées, sorties à sens unique, dégâts, événements conditionnels, boucles de carte, No Clip, véhicules, sessions périmées et historique de transfert.
+- Test navigateur des emplacements, retour, suppression, persistance et réglages Toolbox en 844×390 et 360×740. Deux suites de régression mobile du navigateur ; aucune exécution Android n’est revendiquée pour cette version.
+- Simulation Ruby des API XP/VX/VX Ace : cases bloquées et isolées, événements, historique uniquement après arrivée et emplacements persistants.
+- APK recompilé avec les modules JS et Ruby de la 1.7, signature et contenu embarqué contrôlés avant publication.
+
+Les contrôles de déplacement portent sur les moteurs standards. Les modifications dynamiques de carte, scripts de collision tiers et téléphones/JoiPlay réels restent hors de la validation automatisée.
+
+---
+
 # Validation 1.6.0
 
 - 43 tests JavaScript : éditeurs, traductions, outils et cycle de vie des scènes.
