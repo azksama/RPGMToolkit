@@ -2,7 +2,7 @@
 var toolkitParams = g.PluginManager && g.PluginManager.parameters('RPGMToolkit') || {};
 var hotkey = /^(F6|F7|F10)$/.test(toolkitParams.Hotkey || '') ? toolkitParams.Hotkey : 'F6';
 var pageSize = Math.max(20, Math.min(80, Number(toolkitParams.PageSize) || 60));
-var gameTools, runtime, translator, root, launch, previousFocus, openScene, openVariables, searchTimer;
+var portraitMode, gameTools, runtime, translator, root, launch, previousFocus, openScene, openVariables, searchTimer;
 var opened = false, dirty = false, tab = 'variables', query = '', filter = 'all', page = 0, selected = null, found = [];
 var chosenActor = '', checked = {}, modalMode = '', modalFocus = null, exactValue = '';
 function picked() { return Object.keys(checked).map(function(k) { return checked[k]; }); }
@@ -375,7 +375,7 @@ function initializeRuntime() {
     var storage;
     try { storage = g.localStorage; }
     catch (e) { storage = { getItem:function(){return null;}, setItem:function(){throw new Error('Stockage indisponible');} }; }
-    runtime = createToolkitRuntime(g,storage); translator = createToolkitTranslator(runtime,g);
+    runtime = createToolkitRuntime(g,storage); translator = createToolkitTranslator(runtime,g); portraitMode=createToolkitPortrait(g,runtime);
     hotkey = runtime.prefs.settings.hotkey || hotkey;
     pageSize = runtime.prefs.settings.pageSize || pageSize;
     if (root) applySettings();
@@ -408,7 +408,7 @@ function closeToolkit() {
     if (previousFocus && document.contains(previousFocus)) previousFocus.focus();
 }
 function toggleToolkit() { return opened ? closeToolkit() : openToolkit(); }
-g.RPGMToolkit = { version: '1.7.0', open: openToolkit, close: closeToolkit, toggle: toggleToolkit, isOpen: function() { return opened; } };
+g.RPGMToolkit = { version: '1.8.0', open: openToolkit, close: closeToolkit, toggle: toggleToolkit, isOpen: function() { return opened; } };
 var heldCloseKey = null;
 g.addEventListener('keydown', function(event) {
     var key = event.key || ({ 117: 'F6', 118: 'F7', 121: 'F10', 27: 'Escape' }[event.keyCode]);
@@ -447,6 +447,7 @@ g.SceneManager.updateScene = function() {
     if (!runtime && allowed()) initializeRuntime();
     if (opened && (this._scene !== openScene || g.$gameVariables !== openVariables || this.isSceneChanging())) closeToolkit();
     if (launch) { var hidden = opened || (runtime && !runtime.prefs.settings.showButton) || !allowed(); if (launch.hidden !== hidden) { launch.hidden = hidden; if(!hidden)positionLauncher(); } }
+    if (portraitMode && portraitMode.tick(opened)) return;
     if (gameTools) gameTools.tick();
     if (runtime) runtime.enforceFrozen();
     if (!opened) { var result = originalUpdateScene.apply(this, arguments); if (gameTools) gameTools.tick(); if (runtime) runtime.enforceFrozen(); return result; }

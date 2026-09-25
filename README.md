@@ -1,6 +1,6 @@
 # RPGM Toolkit
 
-Mod intégré pour RPG Maker XP, VX, VX Ace, MV et MZ et installateur Android **Rust + Tauri 2**, version **1.7.0** (mod inclus **1.7.0**).
+Mod intégré pour RPG Maker XP, VX, VX Ace, MV et MZ et installateur Android **Rust + Tauri 2**, version **1.8.0** (mod inclus **1.8.0**).
 
 Recherche et édition de variables, alias anglais pour l’affichage, recherche et ajout d’objets, armes et armures. L’application Android détecte un jeu fourni en ZIP ou en dossier, installe le mod embarqué, permet sa mise à jour et sa désinstallation, avec sauvegardes et restauration.
 
@@ -45,7 +45,7 @@ Licence MIT. Application indépendante de RPG Maker et de JoiPlay.
 
 Après compilation du frontend Android, `npm run test:mobile` à la racine vérifie les formats mobiles et l’accessibilité. Voir [les versions](CHANGELOG.md).
 
-Le [guide Toolbox 1.7.0](plugin/TOOLBOX.md) décrit les sous-menus, outils de jeu, traductions en parallèle et la mise à jour.
+Le [guide Toolbox 1.8.0](plugin/TOOLBOX.md) décrit les sous-menus, outils de jeu, traductions en parallèle et la mise à jour.
 
 ## Bibliothèque de jeux Android
 
@@ -60,3 +60,5 @@ Sélectionner les jeux puis **Installer / mettre à jour**. Les jeux identiques 
 Voir [le guide RGSS](plugin/rgss/README.md) pour XP/VX/VX Ace. Les fichiers `plugins.js` acceptent les littéraux JavaScript usuels : clés sans guillemets, chaînes simples, commentaires et virgules finales. Le fichier n’est jamais exécuté pendant son analyse. Les expressions calculées restent refusées.
 
 L’installateur PowerShell concerne MV/MZ. L’APK inclut les deux variantes et sélectionne automatiquement celle du moteur détecté. RPG Maker 2000/2003 ne sont pas pris en charge.
+
+Le mode **Portrait plein écran** de la 1.8 concerne MV/MZ ; la variante RGSS reste en 1.7.0. Voir [les réglages et limites](plugin/TOOLBOX.md#portrait-plein-écran--mvmz).

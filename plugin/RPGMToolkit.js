@@ -1,6 +1,6 @@
 /*:
  * @target MZ
- * @plugindesc v1.7.0 (MV/MZ) — Variables, inventaire, acteurs et traductions anglaises.
+ * @plugindesc v1.8.0 (MV/MZ) — Variables, inventaire, acteurs et traductions anglaises.
  * @author RPGM Toolkit
  *
  * @param Hotkey
@@ -34,7 +34,7 @@
  * @text Fermer le Toolkit
  *
  * @help
- * RPGM Toolkit 1.7.0 — RPG Maker MV 1.x / MZ
+ * RPGM Toolkit 1.8.0 — RPG Maker MV 1.x / MZ
  * Copiez ce fichier dans js/plugins, puis activez RPGMToolkit en dernier
  * dans le gestionnaire de plugins. Chargez une partie et appuyez sur F6.
  * Toolbox ouvre le menu global. Choisissez Éditeurs ou un outil de jeu.
@@ -69,7 +69,7 @@ function createToolkitRuntime(g, storage) {
     'use strict';
     var kinds = ['variables', 'switches', 'items', 'weapons', 'armors', 'actors', 'skills', 'states', 'selfSwitches'];
     var cache = {}, history = [], redo = [], log = [], baseline = {}, session = null;
-    var prefs = { english: true, source: 'ja', favorites: {}, aliases: {}, settings: { language:'fr', fontSize:13, scrollbarWidth:24, pageSize:0, hotkey:'', showButton:true, safeTeleport:true, buttonX:0, buttonY:0, bottomClose:false } };
+    var prefs = { english: true, source: 'ja', favorites: {}, aliases: {}, settings: { language:'fr', fontSize:13, scrollbarWidth:24, pageSize:0, hotkey:'', showButton:true, safeTeleport:true, buttonX:0, buttonY:0, bottomClose:false, portrait:false } };
     prefs.travel = { places:[], last:null };
     var storageWarning = false, frozen = {}, hooks = [], writing = false;
     function own(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
@@ -98,7 +98,7 @@ function createToolkitRuntime(g, storage) {
         if ([20,40,60,80].indexOf(settings.pageSize) >= 0) prefs.settings.pageSize = settings.pageSize;
         if (['F6','F7','F10'].indexOf(settings.hotkey) >= 0) prefs.settings.hotkey = settings.hotkey;
         if (typeof settings.showButton === 'boolean') prefs.settings.showButton = settings.showButton;
-        ['safeTeleport','bottomClose'].forEach(function(k) { if (typeof settings[k] === 'boolean') prefs.settings[k] = settings[k]; });
+        ['safeTeleport','bottomClose','portrait'].forEach(function(k) { if (typeof settings[k] === 'boolean') prefs.settings[k] = settings[k]; });
         ['buttonX','buttonY'].forEach(function(k) { if (typeof settings[k] === 'number' && isFinite(settings[k])) prefs.settings[k] = Math.max(0, Math.min(100, settings[k])); });
         function place(p) { return p && typeof p.name === 'string' && p.name.length <= 80 && [p.mapId,p.x,p.y,p.direction].every(function(n) { return typeof n === 'number' && isFinite(n) && Math.floor(n) === n; }) && p.mapId > 0 && p.x >= 0 && p.y >= 0 && [2,4,6,8].indexOf(p.direction) >= 0; }
         if (saved.travel) { prefs.travel.places = (Array.isArray(saved.travel.places) ? saved.travel.places : []).filter(place).slice(0,100); prefs.travel.last = place(saved.travel.last) ? saved.travel.last : null; }
@@ -753,7 +753,133 @@ function createToolkitTranslator(runtime, g) {
 }
 
 var TOOLKIT_CSS = "/* Compact full-screen editor. No width-dependent sidebar or oversized touch theme. */\n.rt,.rt-launch { box-sizing:border-box; font:13px/1.4 system-ui,'Segoe UI',Arial,sans-serif; color:#eef0f4; text-align:left; letter-spacing:normal; }\n.rt *,.rt *::before,.rt *::after { box-sizing:border-box; }\n.rt { position:fixed; z-index:2147483001; inset:0; display:flex; padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px); background:#181a1f; user-select:text; }\n.rt[hidden],.rt [hidden],.rt-launch[hidden] { display:none !important; }\n.rt header,.rt main,.rt footer,.rt section,.rt aside,.rt nav { position:static; top:auto; right:auto; bottom:auto; left:auto; float:none; margin:0; }\n.rt button,.rt input,.rt select,.rt textarea { font:inherit; color:inherit; margin:0; touch-action:manipulation; }\n.rt button { cursor:pointer; border:1px solid #4f5663; border-radius:4px; background:#292d35; padding:4px 8px; min-height:30px; line-height:1.2; white-space:nowrap; }\n.rt button:hover { background:#363d49; }\n.rt button:disabled { opacity:.38; cursor:default; }\n.rt button:focus-visible,.rt input:focus-visible,.rt select:focus-visible,.rt textarea:focus-visible,.rt-launch:focus-visible { outline:2px solid #a9cafa; outline-offset:-2px; }\n.rt button[aria-pressed=true] { color:#b7d3fb; border-color:#799dcd; background:#2a3b53; }\n.rt .rt-primary { background:#91b8ee; color:#10223a; border-color:#91b8ee; font-weight:600; }\n.rt .rt-primary:hover { background:#b2cff7; color:#10223a; }\n.rt input:not([type=checkbox]),.rt select,.rt textarea { width:100%; min-width:0; border:1px solid #535c6c; border-radius:4px; background:#15171c; padding:4px 7px; min-height:30px; }\n.rt input::placeholder { color:#a9b2c1; opacity:1; }\n.rt input[type=checkbox] { width:16px; height:16px; accent-color:#91b8ee; flex-shrink:0; cursor:pointer; }\n.rt .rt-panel { display:flex; flex-direction:column; width:100%; height:100%; min-height:0; min-width:0; overflow:hidden; background:#1e2127; }\n.rt .rt-header { flex-shrink:0; padding:5px 8px; border-bottom:1px solid #505764; background:#191c22; }\n.rt .rt-search-line { display:flex; gap:6px; align-items:center; }\n.rt .rt-search { flex:1; min-width:0; }\n.rt .rt-close { min-width:32px; width:32px; padding:0; flex-shrink:0; }\n.rt .rt-filter-line { display:flex; gap:6px; margin-top:5px; }\n.rt .rt-filter-line label { flex:1; min-width:0; }\n.rt .rt-filter-line select { padding-right:2px; }\n.rt .rt-main { display:flex; flex-direction:column; min-height:0; min-width:0; flex:1; overflow:hidden; }\n.rt .rt-bulkbar { display:flex; justify-content:space-between; gap:6px; align-items:center; min-height:30px; padding:0 6px; border-bottom:1px solid #444c59; background:#252932; font-size:11px; flex-shrink:0; }\n.rt .rt-page-check { display:flex; align-items:center; gap:6px; min-height:30px; cursor:pointer; }\n.rt #rt-bulk-actions { display:flex; gap:3px; }\n.rt #rt-bulk-actions button { min-height:26px; padding:3px 6px; font-size:11px; }\n.rt .rt-list { flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; touch-action:pan-y; list-style:none; margin:0; padding:0; scrollbar-width:thin; }\n.rt .rt-row { display:flex; align-items:center; gap:4px; height:36px; min-height:36px; padding:2px 6px; border-bottom:1px solid #383f4b; }\n.rt .rt-row:nth-child(even) { background:#23272f; }\n.rt .rt-row.rt-frozen { box-shadow:inset 2px 0 #91b8ee; }\n.rt .rt-row-check { display:flex; align-items:center; justify-content:center; width:24px; height:32px; flex-shrink:0; cursor:pointer; }\n.rt .rt-select { display:flex; align-items:center; gap:6px; flex:1; min-width:0; text-align:left; border:0; background:transparent; padding:0 3px; height:30px; }\n.rt .rt-select:hover { background:transparent; }\n.rt .rt-row-id { color:#a8b3c4; font-size:10px; flex-shrink:0; max-width:64px; overflow:hidden; text-overflow:ellipsis; }\n.rt .rt-row-title { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }\n.rt .rt-row-value { font:12px/1.4 Consolas,monospace; flex-shrink:0; width:72px; padding:2px 4px; border:1px solid #4b5565; border-radius:3px; background:#161b23; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right; }\n.rt .rt-row-actions { display:flex; align-items:center; gap:3px; flex-shrink:0; }\n.rt .rt-quick { min-width:28px; min-height:28px; height:28px; padding:2px 4px; font-size:12px; }\n.rt .rt-pagination { display:flex; align-items:center; justify-content:space-between; gap:8px; height:30px; padding:2px 8px; border-top:1px solid #4c5462; background:#191d24; font-size:11px; flex-shrink:0; }\n.rt .rt-pagination > div { display:flex; align-items:center; gap:4px; }\n.rt .rt-pagination button { min-height:24px; height:24px; min-width:28px; padding:0 5px; font-size:17px; }\n.rt .rt-pagination input { width:42px; min-height:24px; height:24px; padding:1px 2px; text-align:center; font-size:11px; -moz-appearance:textfield; }\n.rt .rt-pagination input::-webkit-inner-spin-button { -webkit-appearance:none; }\n.rt .rt-footer { display:flex; align-items:center; gap:8px; padding:4px 8px; min-height:38px; background:#16191f; border-top:1px solid #505867; flex-shrink:0; }\n.rt .rt-footer button { font-size:12px; }\n.rt .rt-status { flex:1; min-width:0; font-size:11px; color:#bdcce1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }\n.rt .rt-error { color:#ffbda9; }\n.rt .rt-modal { position:absolute; inset:0; z-index:2; display:flex; align-items:center; justify-content:center; padding:12px; background:#080b10c9; }\n.rt .rt-modal-dialog { width:480px; max-width:100%; max-height:100%; min-height:0; display:flex; flex-direction:column; border:1px solid #73839d; border-radius:8px; background:#242932; box-shadow:0 16px 48px #0009; overflow:hidden; }\n.rt .rt-modal-dialog > header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 12px; border-bottom:1px solid #505c70; background:#1b2029; }\n.rt .rt-modal-dialog > header h2 { margin:0; font-size:15px; font-weight:600; }\n.rt .rt-modal-content { overflow-y:auto; min-height:0; padding:12px; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; overflow-wrap:anywhere; }\n.rt .rt-modal-status { padding:0 12px 8px; font-size:12px; color:#bad4f9; }\n.rt .rt-modal-status:empty { display:none; }\n.rt .rt-modal-content p { margin:0 0 10px; }\n.rt h2 { font-size:18px; margin:0 0 12px; }\n.rt h3 { font-size:17px; margin:0 0 8px; }\n.rt h4 { margin:12px 0 6px; }\n.rt .rt-id { display:block; color:#b1c9eb; font:11px Consolas,monospace; margin-bottom:8px; }\n.rt .rt-field { display:block; margin:0 0 12px; }\n.rt .rt-field > span { display:block; color:#becada; margin-bottom:4px; font-size:12px; }\n.rt .rt-modal-content input:not([type=checkbox]),.rt .rt-modal-content select,.rt .rt-modal-content textarea { font-size:16px; min-height:34px; }\n.rt textarea { min-height:64px; resize:vertical; }\n.rt .rt-full { width:100%; }\n.rt .rt-actions { display:flex; flex-wrap:wrap; gap:6px; }\n.rt .rt-divider { height:1px; background:#4b5566; margin:14px 0; }\n.rt .rt-muted { color:#b7c2d2; }\n.rt .rt-small { font-size:12px; }\n.rt .rt-note { background:#222f42; color:#c4d8f5; border:1px solid #576c8b; border-radius:4px; padding:8px; margin:10px 0; font-size:12px; }\n.rt .rt-empty { padding:24px 12px; text-align:center; color:#b9c4d4; }\n.rt pre { white-space:pre-wrap; overflow-wrap:anywhere; }\n.rt .rt-checkbox { display:flex; align-items:center; gap:8px; padding:6px 0; }\n.rt .rt-stats { display:flex; flex-wrap:wrap; gap:12px; margin:12px 0; }\n.rt .rt-stat strong { display:block; font-size:20px; }\n.rt .rt-log-entry { border-bottom:1px solid #505867; padding:10px 0; }\n.rt .rt-log-entry strong { display:block; }\n.rt code { word-break:break-word; }\n.rt .rt-sr { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }\n.rt-launch { position:fixed; top:12px; right:12px; z-index:2147483000; background:#26374e; border:1px solid #8daedb; border-radius:5px; padding:6px 10px; cursor:pointer; }\n@media(max-width:500px) {\n .rt .rt-row { gap:2px; padding:2px 3px; }\n .rt .rt-row-check { width:20px; }\n .rt .rt-row-id { display:none; }\n .rt .rt-row-value { width:48px; }\n .rt .rt-row-actions { gap:2px; }\n .rt .rt-quick { min-width:24px; padding:2px 3px; font-size:11px; }\n .rt .rt-select { font-size:12px; }\n .rt .rt-footer { gap:4px; }\n .rt .rt-status { font-size:10px; }\n .rt .rt-modal { padding:8px; }\n}\n@media(prefers-reduced-motion:reduce) { .rt * { scroll-behavior:auto !important; transition:none !important; } }\n/* Toolbox navigation and reliable constrained scroll areas, including old WebViews. */\n.rt .rt-home { display:none; flex-direction:column; min-height:0; height:100%; }\n.rt.rt-home-open .rt-home { display:flex; }\n.rt.rt-home-open .rt-panel > .rt-header,.rt.rt-home-open .rt-main,.rt.rt-home-open .rt-footer { display:none; }\n.rt .rt-home-header { display:flex; align-items:center; gap:10px; padding:6px 8px; border-bottom:1px solid #505764; flex-shrink:0; }\n.rt .rt-home-header h1 { font-size:16px; margin:0; }\n.rt .rt-home-header > span { margin-left:auto; font-size:11px; }\n.rt .rt-home-content { display:block; flex:1 1 auto; min-height:0; overflow-y:auto; padding:8px; }\n.rt .rt-home-content button { display:block; position:relative; width:100%; padding:9px 34px 9px 10px; text-align:left; margin-bottom:6px; white-space:normal; }\n.rt .rt-home-content strong { display:block; font-size:14px; font-weight:600; }\n.rt .rt-home-content span { display:block; font-size:12px; color:#bdc8d9; margin-top:2px; }\n.rt .rt-home-content b { position:absolute; right:12px; top:14px; font-size:18px; }\n.rt .rt-icon { width:20px; height:20px; flex:none; image-rendering:pixelated; }\n.rt .rt-modal-dialog > header,.rt .rt-modal-status { flex-shrink:0; }\n.rt .rt-modal-dialog > header { justify-content:flex-start; gap:6px; }\n.rt .rt-modal-content { flex:1 1 auto; }\n.rt .rt-list,.rt .rt-modal-content,.rt .rt-home-content { touch-action:none; overscroll-behavior:contain; }\n.rt .rt-list { user-select:none; }\n.rt .rt-coordinate-fields { display:flex; gap:8px; }\n.rt .rt-coordinate-fields > label { flex:1; min-width:0; }\n.rt-launch { right:auto; left:12px; left:max(12px,env(safe-area-inset-left,0px)); top:max(12px,env(safe-area-inset-top,0px)); }\n.rt { --rt-scrollbar-width:24px; --rt-font-size:13px; font-size:var(--rt-font-size); }\n.rt .rt-select { font-size:var(--rt-font-size); }\n.rt .rt-list,.rt .rt-home-content,.rt .rt-modal-content { padding-right:calc(var(--rt-scrollbar-width) + 8px); scrollbar-width:none; }\n.rt .rt-list::-webkit-scrollbar,.rt .rt-home-content::-webkit-scrollbar,.rt .rt-modal-content::-webkit-scrollbar { display:none; }\n.rt textarea::-webkit-scrollbar { width:18px; height:18px; }\n.rt textarea::-webkit-scrollbar-track { background:#181d25; }\n.rt textarea::-webkit-scrollbar-thumb { background:#9eb3ce; border:3px solid #181d25; border-radius:8px; }\n.rt .rt-scrollbar { position:fixed; z-index:4; background:#11161e; border-left:1px solid #64748b; touch-action:none; user-select:none; cursor:pointer; }\n.rt .rt-scroll-thumb { width:100%; min-height:24px; border:4px solid #11161e; border-radius:9px; background:#9eb3ce; cursor:grab; }\n.rt .rt-scrollbar[aria-disabled=true] .rt-scroll-thumb { background:#394353; }\n.rt .rt-scrollbar:focus-visible { outline:2px solid #bdd8ff; outline-offset:-2px; }\n.rt .rt-toggle { display:flex; align-items:center; gap:12px; min-height:40px; cursor:pointer; position:relative; }\n.rt .rt-toggle > span:first-child { flex:1; }\n.rt .rt-toggle input { position:absolute; right:0; width:48px; height:30px; opacity:0; margin:0; z-index:1; cursor:pointer; }\n.rt .rt-toggle-track { display:block; width:48px; height:28px; flex:none; border-radius:20px; background:#495363; border:1px solid #7a879c; padding:3px; }\n.rt .rt-toggle-track::after { content:''; display:block; width:20px; height:20px; border-radius:50%; background:#f0f3f9; }\n.rt .rt-toggle input:checked + .rt-toggle-track { background:#4272ac; border-color:#a0c5f4; }\n.rt .rt-toggle input:checked + .rt-toggle-track::after { transform:translateX(19px); }\n.rt .rt-toggle input:focus-visible + .rt-toggle-track { outline:2px solid #bdd8ff; outline-offset:3px; }\n.rt .rt-stat-quick { margin:-5px 0 14px; }\n.rt .rt-stat-quick button { flex:1; }\n.rt .rt-import { margin-top:12px; }\n\n.rt .rt-home-content button[role=\"switch\"] { padding-right:72px; }\n.rt .rt-home-content .rt-toggle-track { top:50%; margin-top:-14px; }\n.rt .rt-home-content [aria-checked=\"true\"] .rt-toggle-track { background:#4272ac; border-color:#a0c5f4; }\n.rt .rt-home-content [aria-checked=\"true\"] .rt-toggle-track::after { transform:translateX(19px); }\n\n.rt .rt-bottom-close { position:absolute; bottom:4px; left:4px; z-index:6; width:32px; height:30px; min-height:30px; text-align:center; padding:0; background:#26374e; }\n.rt .rt-place-row { display:flex; gap:6px; margin:6px 0; }\n.rt .rt-place-row > button:first-child { flex:1; min-width:0; }\n.rt .rt-place-row small { display:block; color:#bdc8d8; }\n.rt #rt-places { margin:12px 0; }\n\n.rt.rt-close-recall .rt-footer { padding-left:42px; }\n.rt.rt-close-recall .rt-modal { padding-bottom:42px; }\n.rt.rt-close-recall .rt-home-content { padding-bottom:42px; }\n";
+function createToolkitPortrait(g, runtime) {
+    'use strict';
+    var original=null, active=false, dirty=true, locked=false, error='';
+    var graphics=g.Graphics, manager=g.SceneManager;
+    function supported() {
+        return !!(graphics && manager && g.Scene_Map && /^(MV|MZ)$/.test(g.Utils && g.Utils.RPGMAKER_NAME));
+    }
+    function safe() {
+        var scene=manager && manager._scene;
+        return supported() && scene instanceof g.Scene_Map && !manager.isSceneChanging() &&
+            (!manager.isCurrentSceneStarted || manager.isCurrentSceneStarted()) &&
+            (!scene.isBusy || !scene.isBusy()) && (!scene.isActive || scene.isActive()) &&
+            g.$gamePlayer && !g.$gamePlayer.isTransferring() &&
+            (!g.$gameMap.isEventRunning || !g.$gameMap.isEventRunning()) && !g.$gameMessage.isBusy();
+    }
+    function desiredSize() {
+        var ratio=g.innerWidth>0 && g.innerHeight>g.innerWidth ? g.innerHeight/g.innerWidth : 16/9;
+        return { width:720, height:Math.round(720*Math.min(4,ratio)) };
+    }
+    function resize(w,h,bw,bh,stretch) {
+        graphics._stretchEnabled=stretch;
+        graphics.boxWidth=bw; graphics.boxHeight=bh;
+        if (typeof graphics.resize==='function') graphics.resize(w,h);
+        else { graphics.width=w; graphics.height=h; }
+        if (graphics._updateAllElements) graphics._updateAllElements();
+        manager._screenWidth=w; manager._screenHeight=h; manager._boxWidth=bw; manager._boxHeight=bh;
+    }
+    function restore() {
+        if (!original) return;
+        resize(original.width,original.height,original.boxWidth,original.boxHeight,original.stretch);
+        ['_screenWidth','_screenHeight','_boxWidth','_boxHeight'].forEach(function(k) {
+            if (original.manager[k]===undefined) delete manager[k]; else manager[k]=original.manager[k];
+        });
+    }
+    function request(value) {
+        if (!supported()) throw new Error('Mode portrait disponible sur MV/MZ.');
+        if (!safe()) throw new Error('Activez ce mode depuis la carte, hors événement.');
+        runtime.prefs.settings.portrait=!!value; runtime.savePrefs(); dirty=true; error='';
+        var orientation=g.screen && g.screen.orientation;
+        if (value && orientation && orientation.lock) {
+            try { var promise=orientation.lock('portrait'); if(promise && promise.then)promise.then(function(){if(runtime.prefs.settings.portrait)locked=true;else if(orientation.unlock)orientation.unlock();},function(){}); } catch(e) {}
+        } else if (!value && locked && orientation && orientation.unlock) { orientation.unlock(); locked=false; }
+    }
+    function tick(opened) {
+        if (!supported() || opened || !safe()) return false;
+        var wanted=!!runtime.prefs.settings.portrait, size=desiredSize();
+        if (!wanted && !active) { dirty=false; return false; }
+        if (wanted===active && (!dirty || (graphics.width===size.width && graphics.height===size.height))) { dirty=false; return false; }
+        if (!original) original={width:graphics.width,height:graphics.height,boxWidth:graphics.boxWidth,boxHeight:graphics.boxHeight,stretch:graphics._stretchEnabled,manager:{
+            _screenWidth:manager._screenWidth,_screenHeight:manager._screenHeight,_boxWidth:manager._boxWidth,_boxHeight:manager._boxHeight
+        }};
+        try {
+            if (wanted) resize(size.width,size.height,size.width,size.height,true); else restore();
+            active=wanted; dirty=false;
+            if (g.$gamePlayer.center) g.$gamePlayer.center(g.$gamePlayer.x,g.$gamePlayer.y);
+            manager.goto(g.Scene_Map);
+            return true;
+        } catch(e) {
+            active=false; dirty=false; runtime.prefs.settings.portrait=false; runtime.savePrefs();
+            try { restore(); if(locked && g.screen && g.screen.orientation && g.screen.orientation.unlock){g.screen.orientation.unlock();locked=false;} } catch(ignored) {}
+            error=e.message || String(e); return false;
+        }
+    }
+    function hook(type,name,callback) {
+        var proto=g[type] && g[type].prototype, previous=proto && proto[name];
+        if(typeof previous!=='function')return;
+        proto[name]=function(){return callback.call(this,previous,arguments);};
+    }
+    function cover(sprite) {
+        if(!sprite || !sprite.bitmap || !sprite.scale)return;
+        function fit() {
+            if(!active || !sprite.bitmap || !sprite.bitmap.width || sprite.destroyed)return;
+            var scale=Math.max(graphics.width/sprite.bitmap.width,graphics.height/sprite.bitmap.height);
+            sprite.scale.x=scale;sprite.scale.y=scale;
+            var ax=sprite.anchor ? sprite.anchor.x : 0, ay=sprite.anchor ? sprite.anchor.y : 0;
+            sprite.x=(graphics.width-sprite.bitmap.width*scale)/2+ax*sprite.bitmap.width*scale;
+            sprite.y=(graphics.height-sprite.bitmap.height*scale)/2+ay*sprite.bitmap.height*scale;
+        }
+        if(sprite.bitmap.addLoadListener)sprite.bitmap.addLoadListener(fit);else fit();
+    }
+    hook('Scene_Base','start',function(previous,args){
+        var result=previous.apply(this,args);if(!active)return result;
+        var layer=this._windowLayer, windows=layer && layer.children || [];
+        windows.forEach(function(w){
+            if(!w.move || !w.createContents || w.width<=0 || w.height<=0)return;
+            var width=Math.min(w.width,graphics.boxWidth),height=Math.min(w.height,graphics.boxHeight);
+            var x=Math.max(0,Math.min(w.x,graphics.boxWidth-width)),y=Math.max(0,Math.min(w.y,graphics.boxHeight-height));
+            if(w.width!==width || w.height!==height){w.move(x,y,width,height);w.createContents();if(w.refresh)w.refresh();}
+            else if(w.x!==x || w.y!==y)w.move(x,y,width,height);
+        });
+        cover(this._backgroundSprite);cover(this._backSprite1);cover(this._backSprite2);
+        return result;
+    });
+    hook('Window_Message','processCharacter',function(previous,args){
+        var state=args[0];
+        if(active && state && !state.rtl && this.contents && this.textWidth && this.processNewLine){
+            var ch=state.text.charAt(state.index), left=typeof this.newLineX==='function'?this.newLineX(state):state.left || 0;
+            var buffered=state.buffer?this.textWidth(state.buffer):0;
+            if(ch && ch.charCodeAt(0)>=32 && state.x+buffered>left && state.x+buffered+this.textWidth(ch)>this.contents.width){
+                if(this.flushTextState)this.flushTextState(state);
+                var index=state.index;this.processNewLine(state);state.index=index;
+                if(this.needsNewPage && this.needsNewPage(state))return;
+            }
+        }
+        return previous.apply(this,args);
+    });
+    hook('Window_MenuStatus','maxCols',function(previous,args){return active?1:previous.apply(this,args);});
+    hook('Window_MenuStatus','numVisibleRows',function(previous,args){return active?4:previous.apply(this,args);});
+    hook('Sprite_Actor','setActorHome',function(previous,args){
+        var result=previous.apply(this,args);
+        if(active && this.setHome){var i=Number(args[0])||0;this.setHome(graphics.boxWidth*(0.68+Math.min(i,3)*0.045),graphics.boxHeight*0.45+i*48);}
+        return result;
+    });
+    hook('Sprite_Enemy','setBattler',function(previous,args){
+        var result=previous.apply(this,args), battler=args[0];
+        if(active && original && battler && this.setHome && battler.screenX){
+            var x=battler.screenX()/original.boxWidth, y=battler.screenY()/original.boxHeight;
+            this.setHome(Math.max(48,Math.min(graphics.boxWidth-80,x*graphics.boxWidth)),graphics.boxHeight*0.10+y*Math.min(original.boxHeight,graphics.boxHeight*0.52));
+        }
+        return result;
+    });
+    if(g.addEventListener)g.addEventListener('resize',function(){dirty=true;});
+    return {supported:supported,request:request,tick:tick,active:function(){return active;},error:function(){return error;}};
+}
+
 var toolkitEnglish = {
+    'Portrait plein écran':'Full-screen portrait','Activez ce mode depuis la carte, hors événement.':'Enable this mode on the map, outside an event.','Mode portrait disponible sur MV/MZ.':'Portrait mode is available on MV/MZ.',
     'Nom de l’emplacement':'Location name','Enregistrer l’emplacement actuel':'Save current location','Dernier emplacement':'Last location','Emplacement enregistré.':'Location saved.',
     'Position horizontale':'Horizontal position','Position verticale':'Vertical position','Fermeture en bas à gauche':'Close button at bottom left',
     'Aucune position sûre sur cette carte.':'No safe position on this map.','Passages de la carte indisponibles.':'Map passage data unavailable.',
@@ -837,6 +963,7 @@ function renderSettings() {
     openModal('settings','Paramètres');
     $('.rt-modal-content').innerHTML = settingsSelect('Langue','language',[['fr','Français'],['en','English']])+settingsSelect('Taille du texte','fontSize',[[12,'12 px'],[13,'13 px'],[15,'15 px'],[17,'17 px']])+settingsSelect('Barre de défilement','scrollbarWidth',[[18,'18 px'],[24,'24 px'],[32,'32 px']])+settingsSelect('Lignes par page','pageSize',[[20,20],[40,40],[60,60],[80,80]])+settingsSelect('Raccourci','hotkey',[['F6','F6'],['F7','F7'],['F10','F10']])+'<label class="rt-toggle"><span>Bouton Toolbox</span><input type="checkbox" role="switch" data-setting="showButton"><span class="rt-toggle-track" aria-hidden="true"></span></label>';
     $('.rt-modal-content').innerHTML += '<label class="rt-field"><span>Position horizontale</span><input type="range" min="0" max="100" step="1" data-setting="buttonX"></label><label class="rt-field"><span>Position verticale</span><input type="range" min="0" max="100" step="1" data-setting="buttonY"></label><label class="rt-toggle"><span>Fermeture en bas à gauche</span><input type="checkbox" role="switch" data-setting="bottomClose"><span class="rt-toggle-track" aria-hidden="true"></span></label>';
+    if(portraitMode && portraitMode.supported())$('.rt-modal-content').innerHTML='<label class="rt-toggle"><span>Portrait plein écran</span><input type="checkbox" role="switch" data-setting="portrait"><span class="rt-toggle-track" aria-hidden="true"></span></label>'+$('.rt-modal-content').innerHTML;
     var settings=runtime.prefs.settings;
     Array.prototype.forEach.call(root.querySelectorAll('[data-setting]'),function(el){var key=el.getAttribute('data-setting');if(el.type==='checkbox')el.checked=!!settings[key];else el.value=(key==='buttonX'||key==='buttonY')?settings[key]:settings[key]||(key==='pageSize'?pageSize:hotkey);});
 }
@@ -853,6 +980,7 @@ function applySettings() {
 function installSettings() {
     root.addEventListener('change',function(event){
         var key=event.target.getAttribute('data-setting');if(!key)return;
+        if(key==='portrait'){try{portraitMode.request(event.target.checked);closeToolkit();}catch(e){event.target.checked=runtime.prefs.settings.portrait;say(e.message,true);}return;}
         var value=event.target.type==='checkbox'?event.target.checked:event.target.value;
         if(['fontSize','scrollbarWidth','pageSize','buttonX','buttonY'].indexOf(key)>=0)value=Number(value);
         runtime.prefs.settings[key]=value;runtime.savePrefs();if(key==='showButton'&&value&&!launch)mountLauncher(true);applySettings();
@@ -984,7 +1112,7 @@ function installToolkitScrollbars() {
 var toolkitParams = g.PluginManager && g.PluginManager.parameters('RPGMToolkit') || {};
 var hotkey = /^(F6|F7|F10)$/.test(toolkitParams.Hotkey || '') ? toolkitParams.Hotkey : 'F6';
 var pageSize = Math.max(20, Math.min(80, Number(toolkitParams.PageSize) || 60));
-var gameTools, runtime, translator, root, launch, previousFocus, openScene, openVariables, searchTimer;
+var portraitMode, gameTools, runtime, translator, root, launch, previousFocus, openScene, openVariables, searchTimer;
 var opened = false, dirty = false, tab = 'variables', query = '', filter = 'all', page = 0, selected = null, found = [];
 var chosenActor = '', checked = {}, modalMode = '', modalFocus = null, exactValue = '';
 function picked() { return Object.keys(checked).map(function(k) { return checked[k]; }); }
@@ -1357,7 +1485,7 @@ function initializeRuntime() {
     var storage;
     try { storage = g.localStorage; }
     catch (e) { storage = { getItem:function(){return null;}, setItem:function(){throw new Error('Stockage indisponible');} }; }
-    runtime = createToolkitRuntime(g,storage); translator = createToolkitTranslator(runtime,g);
+    runtime = createToolkitRuntime(g,storage); translator = createToolkitTranslator(runtime,g); portraitMode=createToolkitPortrait(g,runtime);
     hotkey = runtime.prefs.settings.hotkey || hotkey;
     pageSize = runtime.prefs.settings.pageSize || pageSize;
     if (root) applySettings();
@@ -1390,7 +1518,7 @@ function closeToolkit() {
     if (previousFocus && document.contains(previousFocus)) previousFocus.focus();
 }
 function toggleToolkit() { return opened ? closeToolkit() : openToolkit(); }
-g.RPGMToolkit = { version: '1.7.0', open: openToolkit, close: closeToolkit, toggle: toggleToolkit, isOpen: function() { return opened; } };
+g.RPGMToolkit = { version: '1.8.0', open: openToolkit, close: closeToolkit, toggle: toggleToolkit, isOpen: function() { return opened; } };
 var heldCloseKey = null;
 g.addEventListener('keydown', function(event) {
     var key = event.key || ({ 117: 'F6', 118: 'F7', 121: 'F10', 27: 'Escape' }[event.keyCode]);
@@ -1429,6 +1557,7 @@ g.SceneManager.updateScene = function() {
     if (!runtime && allowed()) initializeRuntime();
     if (opened && (this._scene !== openScene || g.$gameVariables !== openVariables || this.isSceneChanging())) closeToolkit();
     if (launch) { var hidden = opened || (runtime && !runtime.prefs.settings.showButton) || !allowed(); if (launch.hidden !== hidden) { launch.hidden = hidden; if(!hidden)positionLauncher(); } }
+    if (portraitMode && portraitMode.tick(opened)) return;
     if (gameTools) gameTools.tick();
     if (runtime) runtime.enforceFrozen();
     if (!opened) { var result = originalUpdateScene.apply(this, arguments); if (gameTools) gameTools.tick(); if (runtime) runtime.enforceFrozen(); return result; }

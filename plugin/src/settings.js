@@ -1,4 +1,5 @@
 var toolkitEnglish = {
+    'Portrait plein écran':'Full-screen portrait','Activez ce mode depuis la carte, hors événement.':'Enable this mode on the map, outside an event.','Mode portrait disponible sur MV/MZ.':'Portrait mode is available on MV/MZ.',
     'Nom de l’emplacement':'Location name','Enregistrer l’emplacement actuel':'Save current location','Dernier emplacement':'Last location','Emplacement enregistré.':'Location saved.',
     'Position horizontale':'Horizontal position','Position verticale':'Vertical position','Fermeture en bas à gauche':'Close button at bottom left',
     'Aucune position sûre sur cette carte.':'No safe position on this map.','Passages de la carte indisponibles.':'Map passage data unavailable.',
@@ -82,6 +83,7 @@ function renderSettings() {
     openModal('settings','Paramètres');
     $('.rt-modal-content').innerHTML = settingsSelect('Langue','language',[['fr','Français'],['en','English']])+settingsSelect('Taille du texte','fontSize',[[12,'12 px'],[13,'13 px'],[15,'15 px'],[17,'17 px']])+settingsSelect('Barre de défilement','scrollbarWidth',[[18,'18 px'],[24,'24 px'],[32,'32 px']])+settingsSelect('Lignes par page','pageSize',[[20,20],[40,40],[60,60],[80,80]])+settingsSelect('Raccourci','hotkey',[['F6','F6'],['F7','F7'],['F10','F10']])+'<label class="rt-toggle"><span>Bouton Toolbox</span><input type="checkbox" role="switch" data-setting="showButton"><span class="rt-toggle-track" aria-hidden="true"></span></label>';
     $('.rt-modal-content').innerHTML += '<label class="rt-field"><span>Position horizontale</span><input type="range" min="0" max="100" step="1" data-setting="buttonX"></label><label class="rt-field"><span>Position verticale</span><input type="range" min="0" max="100" step="1" data-setting="buttonY"></label><label class="rt-toggle"><span>Fermeture en bas à gauche</span><input type="checkbox" role="switch" data-setting="bottomClose"><span class="rt-toggle-track" aria-hidden="true"></span></label>';
+    if(portraitMode && portraitMode.supported())$('.rt-modal-content').innerHTML='<label class="rt-toggle"><span>Portrait plein écran</span><input type="checkbox" role="switch" data-setting="portrait"><span class="rt-toggle-track" aria-hidden="true"></span></label>'+$('.rt-modal-content').innerHTML;
     var settings=runtime.prefs.settings;
     Array.prototype.forEach.call(root.querySelectorAll('[data-setting]'),function(el){var key=el.getAttribute('data-setting');if(el.type==='checkbox')el.checked=!!settings[key];else el.value=(key==='buttonX'||key==='buttonY')?settings[key]:settings[key]||(key==='pageSize'?pageSize:hotkey);});
 }
@@ -98,6 +100,7 @@ function applySettings() {
 function installSettings() {
     root.addEventListener('change',function(event){
         var key=event.target.getAttribute('data-setting');if(!key)return;
+        if(key==='portrait'){try{portraitMode.request(event.target.checked);closeToolkit();}catch(e){event.target.checked=runtime.prefs.settings.portrait;say(e.message,true);}return;}
         var value=event.target.type==='checkbox'?event.target.checked:event.target.value;
         if(['fontSize','scrollbarWidth','pageSize','buttonX','buttonY'].indexOf(key)>=0)value=Number(value);
         runtime.prefs.settings[key]=value;runtime.savePrefs();if(key==='showButton'&&value&&!launch)mountLauncher(true);applySettings();

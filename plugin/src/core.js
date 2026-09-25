@@ -3,7 +3,7 @@ function createToolkitRuntime(g, storage) {
     'use strict';
     var kinds = ['variables', 'switches', 'items', 'weapons', 'armors', 'actors', 'skills', 'states', 'selfSwitches'];
     var cache = {}, history = [], redo = [], log = [], baseline = {}, session = null;
-    var prefs = { english: true, source: 'ja', favorites: {}, aliases: {}, settings: { language:'fr', fontSize:13, scrollbarWidth:24, pageSize:0, hotkey:'', showButton:true, safeTeleport:true, buttonX:0, buttonY:0, bottomClose:false } };
+    var prefs = { english: true, source: 'ja', favorites: {}, aliases: {}, settings: { language:'fr', fontSize:13, scrollbarWidth:24, pageSize:0, hotkey:'', showButton:true, safeTeleport:true, buttonX:0, buttonY:0, bottomClose:false, portrait:false } };
     prefs.travel = { places:[], last:null };
     var storageWarning = false, frozen = {}, hooks = [], writing = false;
     function own(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
@@ -32,7 +32,7 @@ function createToolkitRuntime(g, storage) {
         if ([20,40,60,80].indexOf(settings.pageSize) >= 0) prefs.settings.pageSize = settings.pageSize;
         if (['F6','F7','F10'].indexOf(settings.hotkey) >= 0) prefs.settings.hotkey = settings.hotkey;
         if (typeof settings.showButton === 'boolean') prefs.settings.showButton = settings.showButton;
-        ['safeTeleport','bottomClose'].forEach(function(k) { if (typeof settings[k] === 'boolean') prefs.settings[k] = settings[k]; });
+        ['safeTeleport','bottomClose','portrait'].forEach(function(k) { if (typeof settings[k] === 'boolean') prefs.settings[k] = settings[k]; });
         ['buttonX','buttonY'].forEach(function(k) { if (typeof settings[k] === 'number' && isFinite(settings[k])) prefs.settings[k] = Math.max(0, Math.min(100, settings[k])); });
         function place(p) { return p && typeof p.name === 'string' && p.name.length <= 80 && [p.mapId,p.x,p.y,p.direction].every(function(n) { return typeof n === 'number' && isFinite(n) && Math.floor(n) === n; }) && p.mapId > 0 && p.x >= 0 && p.y >= 0 && [2,4,6,8].indexOf(p.direction) >= 0; }
         if (saved.travel) { prefs.travel.places = (Array.isArray(saved.travel.places) ? saved.travel.places : []).filter(place).slice(0,100); prefs.travel.last = place(saved.travel.last) ? saved.travel.last : null; }

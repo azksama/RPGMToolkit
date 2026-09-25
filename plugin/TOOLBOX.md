@@ -1,4 +1,4 @@
-# Toolbox 1.7.0
+# Toolbox 1.8.0
 
 Sur une carte ou un combat chargé, **Toolbox** (en haut à gauche) ou F6 ouvre le menu global. Godmode et No Clip se basculent directement dans ce menu ; les autres boutons ouvrent un sous-menu. **‹** et la croix d’une fenêtre reviennent au menu précédent. La croix du panneau principal ferme le Toolkit et reprend le jeu.
 
@@ -25,7 +25,7 @@ MyMemory n’est pas obligatoire pour les dictionnaires : **Exporter les noms à
 
 ## Mise à jour
 
-Fermez le jeu, installez l’APK 1.7.0, puis **Mod inclus → jeu → Réinstaller / mettre à jour**. Mettre à jour l’application seule ne remplace pas le plugin déjà installé dans le jeu. Alternative : remplacer `js/plugins/RPGMToolkit.js` (ou `www/js/plugins/RPGMToolkit.js`) par le fichier de la nouvelle archive du mod.
+Fermez le jeu, installez l’APK 1.8.0, puis **Mod inclus → jeu → Réinstaller / mettre à jour**. Mettre à jour l’application seule ne remplace pas le plugin déjà installé dans le jeu. Alternative : remplacer `js/plugins/RPGMToolkit.js` (ou `www/js/plugins/RPGMToolkit.js`) par le fichier de la nouvelle archive du mod.
 
 ## Validation
 
@@ -49,3 +49,14 @@ Dans Téléportation, saisir un nom et choisir **Enregistrer l’emplacement act
 Dans Paramètres, **Position horizontale** et **Position verticale** déplacent Toolbox dans la fenêtre du jeu. **Fermeture en bas à gauche** ajoute un second bouton de fermeture, y compris dans les sous-menus. Ces réglages sont persistants.
 
 Le mode sûr vérifie les règles de passage standard. Les obstacles mobiles, événements qui modifient la carte après l’arrivée ou extensions de collision propres à un jeu ne permettent pas de garantir tous les comportements futurs. Il ne vérifie pas qu’une zone mène au reste du scénario.
+
+
+## Portrait plein écran — MV/MZ
+
+Depuis une carte sans dialogue ni événement en cours : **Toolbox → Paramètres → Portrait plein écran**. Le Toolkit se ferme et la scène est reconstruite aux nouvelles dimensions. Les coordonnées, variables et inventaire ne changent pas. Désactiver l’option restaure les dimensions d’origine. Le réglage est conservé par jeu et s’applique au chargement d’une partie.
+
+La résolution est 720×1280 pour un écran 9:16. Sur un écran vertical plus allongé, la hauteur suit le rapport de la fenêtre du jeu. La surface de rendu grandit réellement ; les pixels ne sont pas déformés pour remplir l’écran. Sur une fenêtre encore horizontale, le rendu reste vertical avec des marges : il faut tourner l’appareil et autoriser le portrait dans le lecteur, notamment JoiPlay. Le verrouillage d’orientation est demandé si l’environnement le permet, sans modifier les préférences du lecteur.
+
+Le module recadre les fonds standards, recentre la caméra, adapte les fenêtres qui dépassent, affiche les acteurs du menu sur une colonne et ajoute un retour à la ligne aux messages. Les positions standards des combattants sont adaptées au portrait.
+
+Cette option est expérimentale sur les jeux comportant des interfaces personnalisées. Les images de cinématique et menus réalisés par événements gardent leurs coordonnées propres ; une petite carte peut laisser apparaître de l’espace vide. Les contrôles virtuels de JoiPlay appartiennent au lecteur et ne peuvent pas être déplacés par ce plugin. XP/VX/VX Ace ne proposent pas ce mode.

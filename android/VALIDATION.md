@@ -1,3 +1,14 @@
+# Validation 1.8.0
+
+- 7 tests unitaires du contrôleur portrait : API MV/MZ, dimensions et caméra, restauration exacte, événements, menus, échec de rendu, fenêtres, retours à la ligne et placements de combat.
+- Un test du canvas simulé dans Chromium vérifie le remplissage 360×640 et 390×844, la conversion des coordonnées tactiles, la persistance et la désactivation. Ce banc n’est pas un jeu RPG Maker complet.
+- Suites existantes du mod, téléportation, interface mobile et installateur exécutées avant publication.
+- APK signé recompilé ; JS/Ruby embarqués comparés aux sources sur les trois architectures.
+
+Aucun test Android/ARTEMIS, téléphone physique ou jeu réel JoiPlay n’est revendiqué pour cette version. Les API MV ont été vérifiées dans le [corescript officiel](https://github.com/rpgtkoolmv/corescript). Les adaptations MZ sont testées sur des doubles d’API, pas dans un jeu MZ complet. Les interfaces personnalisées, images de cinématique et overlays du lecteur nécessitent leur propre validation.
+
+---
+
 # Validation 1.7.0
 
 - 47 tests JavaScript : passages bloqués, cases isolées, sorties à sens unique, dégâts, événements conditionnels, boucles de carte, No Clip, véhicules, sessions périmées et historique de transfert.

@@ -1,5 +1,14 @@
 # Versions
 
+## 1.8.0 — Portrait plein écran MV/MZ
+
+- Option Portrait plein écran, persistante par jeu et désactivée par défaut.
+- Résolution de rendu verticale réelle : 720×1280 en 9:16, hauteur adaptée aux écrans portrait plus allongés, sans étirement du canvas.
+- Recentrage de la caméra, menu des acteurs sur une colonne, fenêtres bornées à la surface de jeu et retour à la ligne des messages.
+- Positions de combat adaptées et retour aux dimensions originales à la désactivation.
+- Activation depuis la carte hors événement ; changements de dimensions différés pendant les dialogues et menus.
+- Module RGSS XP/VX/VX Ace conservé en 1.7.0 : le mode portrait concerne MV/MZ.
+
 ## 1.7.0 — Safe Teleport et emplacements
 
 - Safe Teleport activé par défaut : recherche de la case accessible la plus proche avec une sortie praticable dans les deux sens ; refus si aucune case sûre n’est trouvée.
