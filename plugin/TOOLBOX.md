@@ -60,3 +60,7 @@ La résolution est 720×1280 pour un écran 9:16. Sur un écran vertical plus al
 Le module recadre les fonds standards, recentre la caméra, adapte les fenêtres qui dépassent, affiche les acteurs du menu sur une colonne et ajoute un retour à la ligne aux messages. Les positions standards des combattants sont adaptées au portrait.
 
 Cette option est expérimentale sur les jeux comportant des interfaces personnalisées. Les images de cinématique et menus réalisés par événements gardent leurs coordonnées propres ; une petite carte peut laisser apparaître de l’espace vide. Les contrôles virtuels de JoiPlay appartiennent au lecteur et ne peuvent pas être déplacés par ce plugin. XP/VX/VX Ace ne proposent pas ce mode.
+
+### Portraits et interface mobile (1.8.1)
+
+Le mode portrait normalise le viewport mobile pour conserver une interface lisible. « Portraits en bas » repositionne les grandes images verticales standard (Sprite_Picture) en bas et les garde dans la largeur de l’écran. Désactivez cette option si un jeu utilise ces images autrement. Les sprites créés par des plugins spécifiques ne sont pas détectés automatiquement.

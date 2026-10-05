@@ -15,6 +15,8 @@ function fixture(engine='MV'){
  g.Window_MenuStatus=function(){};g.Window_MenuStatus.prototype.maxCols=()=>4;g.Window_MenuStatus.prototype.numVisibleRows=()=>1;
  g.Sprite_Actor=function(){};g.Sprite_Actor.prototype.setActorHome=function(i){this.setHome(600+i*32,280+i*48);};g.Sprite_Actor.prototype.setHome=function(x,y){this.home=[x,y];};
  g.Sprite_Enemy=function(){};g.Sprite_Enemy.prototype.setBattler=function(b){this.setHome(b.screenX(),b.screenY());};g.Sprite_Enemy.prototype.setHome=g.Sprite_Actor.prototype.setHome;
+ g.Sprite_Picture=function(){this.bitmap={width:240,height:540};this.scale={x:1,y:1};this.anchor={x:0,y:0};this.baseX=650;this.baseY=12;};
+ g.Sprite_Picture.prototype.update=function(){this.x=this.baseX;this.y=this.baseY;};
  const runtime={prefs:{settings:{portrait:false}},savePrefs(){this.saved=!!this.prefs.settings.portrait;}};
  vm.createContext(g);vm.runInContext(fs.readFileSync(path.join(__dirname,'../src/portrait.js'),'utf8'),g);
  return {g,runtime,events,p:g.createToolkitPortrait(g,runtime)};
@@ -54,4 +56,15 @@ test('battle home positions fit portrait and standard positions return when disa
  const {g,p}=fixture();p.request(true);p.tick(false);const actor=new g.Sprite_Actor(),enemy=new g.Sprite_Enemy();actor.setActorHome(3);enemy.setBattler({screenX:()=>780,screenY:()=>580});
  for(const sprite of [actor,enemy])assert(sprite.home[0]>=0&&sprite.home[0]<720&&sprite.home[1]>0&&sprite.home[1]<1000);
  p.request(false);p.tick(false);actor.setActorHome(0);assert.deepEqual(actor.home,[600,280]);
+});
+
+test('portrait pictures are bottom aligned without accumulating offsets or moving icons and backgrounds',()=>{
+ const {g,p,runtime}=fixture();p.request(true);p.tick(false);
+ const sprite=new g.Sprite_Picture();sprite.update();assert.equal(sprite.y,740);assert.equal(sprite.x,480);
+ sprite.update();assert.equal(sprite.y,740);
+ sprite.anchor.y=0.5;sprite.update();assert.equal(sprite.y,1010);
+ runtime.prefs.settings.portraitPictures=false;sprite.update();assert.equal(sprite.y,12);
+ runtime.prefs.settings.portraitPictures=true;sprite.bitmap={width:816,height:624};sprite.update();assert.equal(sprite.y,12);
+ sprite.bitmap={width:32,height:64};sprite.update();assert.equal(sprite.y,12);
+ sprite.bitmap={width:240,height:540};p.request(false);p.tick(false);sprite.update();assert.equal(sprite.y,12);
 });

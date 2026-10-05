@@ -1,7 +1,21 @@
 function createToolkitPortrait(g, runtime) {
     'use strict';
     var original=null, active=false, dirty=true, locked=false, error='';
-    var graphics=g.Graphics, manager=g.SceneManager;
+    var graphics=g.Graphics, manager=g.SceneManager, viewport=null;
+    function setViewport(enabled) {
+        var doc=g.document;if(!doc || !doc.head)return;
+        if(enabled && !viewport){
+            var node=doc.querySelector('meta[name=viewport]');
+            viewport={node:node,content:node && node.getAttribute('content'),created:!node};
+            if(!node){node=doc.createElement('meta');node.name='viewport';doc.head.appendChild(node);viewport.node=node;}
+            node.setAttribute('content','width=device-width, initial-scale=1, viewport-fit=cover');
+        } else if(!enabled && viewport){
+            if(viewport.created)viewport.node.remove();
+            else if(viewport.content===null)viewport.node.removeAttribute('content');
+            else viewport.node.setAttribute('content',viewport.content);
+            viewport=null;
+        }
+    }
     function supported() {
         return !!(graphics && manager && g.Scene_Map && /^(MV|MZ)$/.test(g.Utils && g.Utils.RPGMAKER_NAME));
     }
@@ -43,7 +57,9 @@ function createToolkitPortrait(g, runtime) {
     }
     function tick(opened) {
         if (!supported() || opened || !safe()) return false;
-        var wanted=!!runtime.prefs.settings.portrait, size=desiredSize();
+        var wanted=!!runtime.prefs.settings.portrait;
+        setViewport(wanted);
+        var size=desiredSize();
         if (!wanted && !active) { dirty=false; return false; }
         if (wanted===active && (!dirty || (graphics.width===size.width && graphics.height===size.height))) { dirty=false; return false; }
         if (!original) original={width:graphics.width,height:graphics.height,boxWidth:graphics.boxWidth,boxHeight:graphics.boxHeight,stretch:graphics._stretchEnabled,manager:{
@@ -56,7 +72,7 @@ function createToolkitPortrait(g, runtime) {
             manager.goto(g.Scene_Map);
             return true;
         } catch(e) {
-            active=false; dirty=false; runtime.prefs.settings.portrait=false; runtime.savePrefs();
+            setViewport(false); active=false; dirty=false; runtime.prefs.settings.portrait=false; runtime.savePrefs();
             try { restore(); if(locked && g.screen && g.screen.orientation && g.screen.orientation.unlock){g.screen.orientation.unlock();locked=false;} } catch(ignored) {}
             error=e.message || String(e); return false;
         }
@@ -78,6 +94,16 @@ function createToolkitPortrait(g, runtime) {
         }
         if(sprite.bitmap.addLoadListener)sprite.bitmap.addLoadListener(fit);else fit();
     }
+    hook('Sprite_Picture','update',function(previous,args){
+        var result=previous.apply(this,args);
+        if(!active || !original || runtime.prefs.settings.portraitPictures===false || !this.bitmap || !this.scale)return result;
+        var w=this.bitmap.width*Math.abs(this.scale.x), h=this.bitmap.height*Math.abs(this.scale.y);
+        if(h<original.height*0.4 || w>=h*0.9 || w>original.width*0.65)return result;
+        var ay=this.anchor?this.anchor.y:0, ax=this.anchor?this.anchor.x:0;
+        this.y=graphics.height-h*(1-ay);
+        this.x=Math.max(w*ax,Math.min(graphics.width-w*(1-ax),this.x));
+        return result;
+    });
     hook('Scene_Base','start',function(previous,args){
         var result=previous.apply(this,args);if(!active)return result;
         var layer=this._windowLayer, windows=layer && layer.children || [];

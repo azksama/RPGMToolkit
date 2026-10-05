@@ -84,7 +84,7 @@ try {
             $entry = $existing[0]
             $entry | Add-Member -NotePropertyName status -NotePropertyValue $true -Force
         } else {
-            $entry = [pscustomobject]@{ name = $pluginName; status = $true; description = 'RPGM Toolkit 1.8.0'; parameters = [pscustomobject]@{ Hotkey = 'F6'; ShowButton = 'true'; PlaytestOnly = 'false'; PageSize = '60' } }
+            $entry = [pscustomobject]@{ name = $pluginName; status = $true; description = 'RPGM Toolkit 1.8.1'; parameters = [pscustomobject]@{ Hotkey = 'F6'; ShowButton = 'true'; PlaytestOnly = 'false'; PageSize = '60' } }
         }
         $newEntries += $entry
     }

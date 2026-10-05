@@ -1,3 +1,7 @@
+# Validation 1.8.1
+
+10 tests portrait passent, dont une page mobile simulée avec un viewport de largeur 1280, restauration, images verticales, exclusion des icônes et fonds. Tests Chromium de bureau avec émulation mobile ; aucun test téléphone/JoiPlay réel.
+
 # Validation 1.8.0
 
 - 7 tests unitaires du contrôleur portrait : API MV/MZ, dimensions et caméra, restauration exacte, événements, menus, échec de rendu, fenêtres, retours à la ligne et placements de combat.

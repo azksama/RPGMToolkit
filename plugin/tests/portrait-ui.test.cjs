@@ -10,11 +10,11 @@ SceneManager.goto=function(type){this._scene=new type();this._sceneStarted=true;
 $gamePlayer.center=function(x,y){window.centered=[x,y];};
 Graphics._updateAllElements();
 `;
-test('portrait control resizes the rendered game, persists, follows tall screens and restores landscape',async()=>{
+for(const legacy of [false,true])test((legacy?'legacy mobile viewport: ':'')+'portrait control resizes the rendered game, persists, follows tall screens and restores landscape',async()=>{
  const base=path.resolve(__dirname,'..');
  const server=http.createServer((req,res)=>{
   if(req.url==='/portrait'){
-   res.setHeader('Content-Type','text/html');res.end('<!doctype html><html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Portrait fixture</title><style>body{margin:0;background:#000}canvas{position:fixed}</style><canvas id="game"></canvas><span id="ticks" hidden></span><script src="/demo/fixture.js"></script><script>'+renderer+'</script><script src="/RPGMToolkit.js"></script></html>');return;
+   res.setHeader('Content-Type','text/html');res.end('<!doctype html><html><meta charset="utf-8"><meta name="viewport" content="'+(legacy?'width=1280':'width=device-width,initial-scale=1')+'"><title>Portrait fixture</title><style>body{margin:0;background:#000}canvas{position:fixed}</style><canvas id="game"></canvas><span id="ticks" hidden></span><script src="/demo/fixture.js"></script><script>'+renderer+'</script><script src="/RPGMToolkit.js"></script></html>');return;
   }
   const file=path.resolve(base,'.'+new URL(req.url,'http://localhost').pathname);
   if(!file.startsWith(base+path.sep)){res.writeHead(403).end();return;}
@@ -22,7 +22,7 @@ test('portrait control resizes the rendered game, persists, follows tall screens
  });
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const browser=await chromium.launch();
  try{
-  const page=await browser.newPage({viewport:{width:360,height:640}}),errors=[];page.on('pageerror',e=>errors.push(e.message));
+  const page=await browser.newPage({viewport:{width:360,height:640},isMobile:legacy,hasTouch:legacy}),errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto('http://127.0.0.1:'+server.address().port+'/portrait');
   await page.locator('.rt-launch').click();await page.locator('[data-action="tool-settings"]').click();
   await page.locator('[data-setting="portrait"]').check();
@@ -33,9 +33,20 @@ test('portrait control resizes the rendered game, persists, follows tall screens
   box=await page.locator('#game').boundingBox();assert(box.width>389&&box.height>843);
   await page.reload();await page.waitForFunction(()=>Graphics.width===720&&Graphics.height===1558);
   if(process.env.RPGM_SCREENSHOTS){fs.mkdirSync(process.env.RPGM_SCREENSHOTS,{recursive:true});await page.screenshot({path:path.join(process.env.RPGM_SCREENSHOTS,'portrait-canvas.png')});}
-  await page.locator('.rt-launch').click();await page.locator('[data-action="tool-settings"]').click();
-  assert(await page.locator('[data-setting="portrait"]').isChecked());await page.locator('[data-setting="portrait"]').uncheck();
+  await page.locator('.rt-launch').click();
+  assert(await page.locator('.rt-home-content strong').first().evaluate(el=>parseFloat(getComputedStyle(el).fontSize)>=14));
+  if(process.env.RPGM_SCREENSHOTS)await page.screenshot({path:path.join(process.env.RPGM_SCREENSHOTS,legacy?'portrait-home-legacy.png':'portrait-home.png')});
+  await page.locator('[data-action="tool-editors"]').click();
+  assert(await page.locator('.rt-row-title').first().evaluate(el=>el.getBoundingClientRect().width>15));
+  if(process.env.RPGM_SCREENSHOTS)await page.screenshot({path:path.join(process.env.RPGM_SCREENSHOTS,legacy?'portrait-editor-legacy.png':'portrait-editor.png')});
+  await page.locator('[data-action="tool-home"]').click();
+  await page.locator('[data-action="tool-settings"]').click();
+  assert(await page.locator('[data-setting="portrait"]').isChecked());
+  assert.equal(await page.evaluate(()=>Math.round(visualViewport.width)),390);
+  assert(await page.locator('.rt-modal-dialog').evaluate(el=>el.getBoundingClientRect().width<=390));
+  assert(await page.locator('[data-setting="portraitPictures"]').isChecked());await page.locator('[data-setting="portrait"]').uncheck();
   await page.waitForFunction(()=>Graphics.width===816&&Graphics.height===624&&!RPGMToolkit.isOpen());
+  assert.equal(await page.locator('meta[name=viewport]').getAttribute('content'),legacy?'width=1280':'width=device-width,initial-scale=1');
   await page.reload();await page.waitForFunction(()=>window._ticks>2);assert.equal(await page.evaluate(()=>Graphics.width),816);assert.deepEqual(errors,[]);
  }finally{await browser.close();await new Promise(resolve=>server.close(resolve));}
 });

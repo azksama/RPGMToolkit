@@ -152,3 +152,19 @@
 .rt.rt-close-recall .rt-footer { padding-left:42px; }
 .rt.rt-close-recall .rt-modal { padding-bottom:42px; }
 .rt.rt-close-recall .rt-home-content { padding-bottom:42px; }
+
+@media (orientation:portrait) and (max-width:600px) {
+ .rt .rt-home-header { min-height:44px; }
+ .rt .rt-home-content strong { font-size:15px; }
+ .rt .rt-home-content span { font-size:12px; }
+ .rt .rt-home-content button { min-height:54px; }
+ .rt .rt-modal { padding:6px; }
+ .rt .rt-modal-dialog { width:100%; }
+ .rt .rt-filter-line { flex-wrap:wrap; }
+ .rt #rt-exact-wrap { flex-basis:100%; }
+ .rt .rt-row-value { width:42px; }
+ .rt .rt-row-check { width:18px; }
+ .rt .rt-icon { width:16px; height:16px; }
+ .rt .rt-select { gap:3px; }
+ .rt .rt-bulkbar { flex-wrap:wrap; }
+}
