@@ -75,14 +75,15 @@ class RgssStorage(private val activity: Activity) {
         } else current(root)
         val ini = decode(state.getString("originalIni"))
         val title = ini.toString(Charsets.UTF_8).lineSequence().firstOrNull { it.trim().startsWith("Title=", true) }?.substringAfter('=')?.trim()
-        return JSObject().put("engine", RgssFormat.scriptPath(ini).second).put("title", title?.takeIf { it.isNotEmpty() } ?: root.name ?: "Jeu RGSS")
-            .put("name", root.name).put("kind", "folder").put("registry", state.toString()).put("plugin", JSONObject.NULL).put("recoveryNeeded", pending != null)
+        return RegistryTransfer.attach(JSObject().put("engine", RgssFormat.scriptPath(ini).second).put("title", title?.takeIf { it.isNotEmpty() } ?: root.name ?: "Jeu RGSS")
+            .put("name", root.name).put("kind", "folder").put("plugin", JSONObject.NULL).put("recoveryNeeded", pending != null),state,java.io.File(activity.cacheDir,"rpgm-toolkit"))
     }
     private fun fingerprint(registry: String): String = hash(registry.toByteArray(Charsets.UTF_8) + byteArrayOf(0, 2))
     fun apply(root: DocumentFile, args: ApplyArgs): JSObject {
         require(root.toolkitChild(MARKER) == null) { "Restaurez d’abord l’opération RGSS interrompue." }
         val before = current(root); require(fingerprint(before.toString()) == args.expected) { "Le jeu a changé depuis l’analyse." }
         val patched = JSONObject(args.registry)
+        args.registry = ""
         val original = decode(before.getString("originalIni")); val target = RgssFormat.target(original)
         require(patched.getString("originalIni") == before.getString("originalIni")) { "Original RGSS incohérent." }
         val newIni = decode(patched.getString("ini")); require(newIni.contentEquals(if (args.uninstall) original else RgssFormat.redirect(original))) { "Chemin RGSS modifié inattendu." }

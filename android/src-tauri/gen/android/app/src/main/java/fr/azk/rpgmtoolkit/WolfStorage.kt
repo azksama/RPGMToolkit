@@ -34,12 +34,27 @@ class WolfStorage(private val context: Context) {
         } ?: error("Lecture WOLF refusée : ${file.name}")
     }
     private fun hash(bytes: ByteArray)=MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+    private fun hash(file: DocumentFile, limit: Int): String {
+        require(file.isFile && file.length() <= limit) { "Fichier WOLF trop volumineux." }
+        val digest=MessageDigest.getInstance("SHA-256")
+        context.contentResolver.openInputStream(file.uri)?.use { stream ->
+            val buffer=ByteArray(65536);var total=0L
+            while(true) {val count=stream.read(buffer);if(count<0)break;total+=count;require(total<=limit);digest.update(buffer,0,count)}
+        } ?: error("Vérification WOLF refusée.")
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
     fun write(parent: DocumentFile, name: String, bytes: ByteArray, limit: Int = LIMIT): DocumentFile {
         require(bytes.size <= limit) { "Fichier WOLF trop volumineux." }
         val file=parent.toolkitChild(name) ?: parent.createFile("application/octet-stream",name) ?: error("Création refusée : $name")
         require(file.isFile && file.canWrite()) { "Écriture refusée : $name" }
         context.contentResolver.openOutputStream(file.uri,"wt")?.use { it.write(bytes);it.flush() } ?: error("Écriture refusée : $name")
-        require(read(file,limit).contentEquals(bytes)) { "Vérification échouée : $name" };return file
+        require(hash(file,limit)==hash(bytes)) { "Vérification échouée : $name" };return file
+    }
+    private fun writeState(parent: DocumentFile, registry: JSONObject) {
+        val file=parent.toolkitChild("state.json") ?: parent.createFile("application/json","state.json") ?: error("Création de la copie de secours refusée.")
+        require(file.isFile && file.canWrite()) { "Copie de secours inaccessible." }
+        val expected=context.contentResolver.openOutputStream(file.uri,"wt")?.use { RegistryTransfer.write(registry,it,BUNDLE_LIMIT.toLong()) } ?: error("Écriture de la copie de secours refusée.")
+        require(hash(file,BUNDLE_LIMIT)==expected) { "Vérification de la copie de secours échouée." }
     }
     fun directory(parent: DocumentFile, name: String): DocumentFile {
         val dir=parent.toolkitChild(name) ?: parent.createDirectory(name) ?: error("Création refusée : $name")
@@ -79,7 +94,7 @@ class WolfStorage(private val context: Context) {
     fun inspect(root: DocumentFile): JSObject {
         val pending=root.toolkitChild(PENDING)?.let { JSONObject(read(it,65536).toString(Charsets.UTF_8)) }
         val state=if(pending==null)current(root) else state(root,pending)
-        return JSObject().put("engine","WOLF").put("title",root.name ?: "WOLF RPG").put("name",root.name).put("kind","folder").put("registry",state.toString()).put("recoveryNeeded",pending!=null)
+        return RegistryTransfer.attach(JSObject().put("engine","WOLF").put("title",root.name ?: "WOLF RPG").put("name",root.name).put("kind","folder").put("recoveryNeeded",pending!=null),state,java.io.File(context.cacheDir,"rpgm-toolkit"))
     }
     private fun decode(bundle: JSONObject, key: String): ByteArray {
         val text=bundle.getString(key);require(text.length <= LIMIT*4/3+4);return Base64.decode(text,Base64.NO_WRAP).also {require(it.size<=LIMIT)}
@@ -105,6 +120,7 @@ class WolfStorage(private val context: Context) {
         require(root.toolkitChild(PENDING)==null) { "Restauration WOLF requise." }
         val before=current(root);require(fingerprint(before)==args.expected) { "Le jeu a changé depuis l’analyse." }
         val next=JSONObject(args.registry)
+        args.registry=""
         for(key in listOf("system","systemNames","mutable","mutableNames"))require(before.opt(key)==next.opt(key)) { "Schéma WOLF modifié inattendu." }
         val original=if(before.isNull("original"))before.getString("common")else before.getString("original")
         val originalGame=if(before.isNull("originalGame"))before.getString("game")else before.getString("originalGame")
@@ -112,7 +128,7 @@ class WolfStorage(private val context: Context) {
         require(if(args.uninstall)next.getString("game")==originalGame else next.getString("originalGame")==originalGame) { "Copie originale Game.dat incohérente." }
         val id="${System.currentTimeMillis()}-${UUID.randomUUID()}-wolf"
         val backup=directory(directory(root,".rpgm-toolkit-backups"),id)
-        write(backup,"state.json",before.toString().toByteArray(Charsets.UTF_8),BUNDLE_LIMIT)
+        writeState(backup,before)
         val journal=JSONObject().put("backup",id).put("fingerprint",args.expected)
         write(backup,"manifest.json",journal.toString().toByteArray(Charsets.UTF_8))
         require(fingerprint(current(root))==args.expected) { "Le jeu a changé pendant la copie de secours." }

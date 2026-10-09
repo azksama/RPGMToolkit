@@ -1,5 +1,12 @@
 # Versions
 
+## 1.9.2 — Transfert des grands jeux
+
+- Correction de l’échec Android « String length exceeds the maximum length » pendant l’installation WOLF.
+- Les registres volumineux WOLF et RGSS passent par un fichier temporaire du cache privé, supprimé après lecture ou échec.
+- Validation des chemins, du format UTF-8 et de la taille avant toute modification du jeu.
+- Sérialisation des réponses et copies de secours par flux ; vérification SHA-256 sans recopier les grands fichiers en mémoire.
+
 ## 1.9.1 — Gros catalogues WOLF
 
 - Suppression du refus des jeux dépassant 20 000 champs et de la limite Android de 8 Mo pour le catalogue.

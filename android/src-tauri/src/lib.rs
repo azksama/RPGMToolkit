@@ -3,6 +3,8 @@ mod rgss;
 mod rgss_archive;
 mod wolf;
 mod folders;
+#[cfg(any(target_os = "android", test))]
+mod mobile_payload;
 use engine::{Inspection, Snapshot};
 use serde_json::{json, Value};
 use std::{path::PathBuf, sync::{Mutex, atomic::{AtomicBool, Ordering}}};
@@ -24,7 +26,18 @@ impl Drop for Busy<'_> { fn drop(&mut self){self.0.store(false,Ordering::SeqCst)
 struct Storage(tauri::plugin::PluginHandle<tauri::Wry>);
 fn native(app:&AppHandle, command:&str, data:Value)->Result<Value,String> {
     #[cfg(target_os="android")]
-    { app.state::<Storage>().0.run_mobile_plugin(command,data).map_err(|e|e.to_string()) }
+    {
+        let cache = if mobile_payload::needs_file(command, &data) {
+            app.path().app_cache_dir().map_err(|e| e.to_string())?.join("rpgm-toolkit")
+        } else { PathBuf::new() };
+        let result = mobile_payload::invoke(command, data, &cache, |args| {
+            app.state::<Storage>().0.run_mobile_plugin(command,args).map_err(|e|e.to_string())
+        })?;
+        if result.get("registryPath").is_some() {
+            let cache = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("rpgm-toolkit");
+            mobile_payload::receive(result, &cache)
+        } else { Ok(result) }
+    }
     #[cfg(not(target_os="android"))]
     { let _=(app,command,data); Err("Le sélecteur natif est disponible dans l’application Android. Installez l’APK pour choisir votre jeu.".into()) }
 }

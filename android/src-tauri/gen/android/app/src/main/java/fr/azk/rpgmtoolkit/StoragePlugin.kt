@@ -24,7 +24,7 @@ import org.json.JSONArray
 import android.provider.DocumentsContract
 
 @InvokeArg class PickArgs { var kind: String = "zip" }
-@InvokeArg class ApplyArgs { var token: String = ""; var registry: String = ""; var plugin: String? = null; var expected: String = ""; var uninstall: Boolean = false }
+@InvokeArg class ApplyArgs { var token: String = ""; var registry: String = ""; var registryPath: String = ""; var plugin: String? = null; var expected: String = ""; var uninstall: Boolean = false }
 @InvokeArg class FolderArgs { var token: String = "" }
 @InvokeArg class ExportArgs { var path: String = ""; var name: String = "game-toolkit.zip" }
 
@@ -236,6 +236,7 @@ class StoragePlugin(private val activity: Activity) : Plugin(activity) {
     @Command fun applyFolder(invoke: Invoke) {
         val args = invoke.parseArgs(ApplyArgs::class.java)
         background(invoke) {
+            RegistryTransfer.load(args, cache)
             val root = checkedRoot(args.token)
             if (WolfStorage.detected(root)) { require(!WolfOverlayService.running) { "Fermez le menu flottant avant de modifier le mod WOLF." }; return@background wolf.apply(root, args) }
             if (isRgss(root)) return@background rgss.apply(root, args)

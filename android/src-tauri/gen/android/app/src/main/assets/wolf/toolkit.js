@@ -1,6 +1,6 @@
 /*:
  * @target MZ
- * @plugindesc v1.9.1 (MV/MZ) — Variables, inventaire, acteurs et traductions anglaises.
+ * @plugindesc v1.9.2 (MV/MZ) — Variables, inventaire, acteurs et traductions anglaises.
  * @author RPGM Toolkit
  *
  * @param Hotkey
@@ -34,7 +34,7 @@
  * @text Fermer le Toolkit
  *
  * @help
- * RPGM Toolkit 1.9.1 — RPG Maker MV 1.x / MZ
+ * RPGM Toolkit 1.9.2 — RPG Maker MV 1.x / MZ
  * Copiez ce fichier dans js/plugins, puis activez RPGMToolkit en dernier
  * dans le gestionnaire de plugins. Chargez une partie et appuyez sur F6.
  * Toolbox ouvre le menu global. Choisissez Éditeurs ou un outil de jeu.
@@ -1581,7 +1581,7 @@ function closeToolkit() {
     if (previousFocus && document.contains(previousFocus)) previousFocus.focus();
 }
 function toggleToolkit() { return opened ? closeToolkit() : openToolkit(); }
-g.RPGMToolkit = { version: '1.9.1', open: openToolkit, close: closeToolkit, toggle: toggleToolkit, isOpen: function() { return opened; } };
+g.RPGMToolkit = { version: '1.9.2', open: openToolkit, close: closeToolkit, toggle: toggleToolkit, isOpen: function() { return opened; } };
 var heldCloseKey = null;
 g.addEventListener('keydown', function(event) {
     var key = event.key || ({ 117: 'F6', 118: 'F7', 121: 'F10', 27: 'Escape' }[event.keyCode]);

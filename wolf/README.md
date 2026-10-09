@@ -1,4 +1,4 @@
-# WOLF Toolkit 1.9.1
+# WOLF Toolkit 1.9.2
 
 Éditeur mobile flottant pour WOLF RPG Editor 2 et 3 sous Winlator. L’interface réutilise le Toolkit MV/MZ : recherche, favoris, sélection multiple, édition en fenêtre, gel, historique, alias anglais et traductions persistantes.
 

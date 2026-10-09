@@ -1,3 +1,19 @@
+# Validation 1.9.2
+
+Vérifications du 9 octobre 2026.
+
+- Erreur de limite de chaîne reproduite dans l’APK 1.9.1 avec un jeu WOLF de 200 032 champs, puis dans le véritable `Invoke.parseArgs` de Tauri/Jackson. Les fixtures WOLF 2/3 dépassent 20 millions de caractères, entre 21,5 et 23,6 Mo par registre installé.
+- Transferts Rust/Android par fichiers du cache privé : lecture UTF-8 bornée, refus des chemins externes et liens symboliques, suppression après lecture ou erreur. Les arguments d’installation restent inférieurs à 256 caractères pour les grands jeux testés.
+- Sérialisation JSON et copies de secours par flux, avec relecture SHA-256. La sérialisation conserve les octets du JSON Android, y compris slashs, échappements et Unicode à la frontière des blocs. La taille du heap Android n’a pas été augmentée.
+- 25 tests Rust de l’installateur, 10 tests Rust WOLF, 48 tests JavaScript, 2 parcours Chromium et 11 tests Kotlin réussis.
+- 6 tests d’instrumentation sur l’émulateur Android Studio API 36.1 : installation, mise à jour et désinstallation WOLF 2/3 avec 200 032 champs ; restauration d’une interruption avec 100 032 champs ; originaux et sauvegardes conservés ; transfert réel via `Invoke.parseArgs`, chemins et Unicode contrôlés.
+- APK release R8 : installation et désinstallation groupées de 12 fixtures, dont XP/VX/VX Ace libres et archivés, MV 1.0/1.5, MZ et trois jeux WOLF. Fichiers, archives et sauvegardes comparés octet par octet après restauration ; entrées et paramètres MV/MZ comparés après normalisation JSON. La mise à jour du véritable pont 1.9.1 vers 1.9.2 passe sur le catalogue WOLF de 200 032 champs : un jeu mis à jour, onze inchangés, aucune erreur ni exception de mémoire dans Logcat.
+- Signature identique aux versions précédentes, alignements ZIP et ELF de 16 Ko sur ARM64, ARMv7 et x86_64. Modules et ressources WebView comparés aux sources ; fixtures exclues de l’APK release.
+
+Les grands catalogues utilisent des fixtures. Aucun essai sur le jeu du signalement, téléphone physique ou Winlator réel n’est revendiqué. Les plafonds de 64 Mo par fichier/catalogue et de 256 Mo par registre restent en place.
+
+---
+
 # Validation 1.9.1
 
 Vérifications du 9 octobre 2026.
