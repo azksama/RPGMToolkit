@@ -1,4 +1,4 @@
-# RPGM Toolkit Android — 1.9.0
+# RPGM Toolkit Android — 1.9.1
 
 Application Android Rust + Tauri 2, interface React/TypeScript, accès aux fichiers par un plugin Kotlin Storage Access Framework. Les modules MV/MZ `RPGMToolkit.js` et XP/VX/VX Ace `RPGMToolkit.rb` sont embarqués dans la bibliothèque Rust.
 

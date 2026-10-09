@@ -1,5 +1,14 @@
 # Versions
 
+## 1.9.1 — Gros catalogues WOLF
+
+- Suppression du refus des jeux dépassant 20 000 champs et de la limite Android de 8 Mo pour le catalogue.
+- Adressage des champs par plages et matrice ; stockage de gel partagé, indépendant du nombre de champs.
+- Chargement du menu WOLF hors du thread principal et accès indexé aux entrées de l’éditeur.
+- Validation du catalogue sans seconde copie complète ; copies de secours adaptées aux grands dossiers.
+- Profils pouvant dépasser 20 000 associations, dans la limite du catalogue du jeu.
+- Menus de sélection internes au panneau WOLF pour fonctionner dans la fenêtre flottante Android.
+
 ## 1.9.0 — WOLF / Winlator
 
 - Éditeur WOLF 2/3 flottant : recherche, édition, favoris, sélection multiple, gel et traductions persistantes.

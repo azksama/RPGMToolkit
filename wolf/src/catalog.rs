@@ -2,7 +2,11 @@ use crate::{
     codec::{payload, Reader},
     Result,
 };
+use serde::de::{SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
+use std::{fmt, io::Write};
+
+pub const MAX_ENTRIES: usize = 1_110_000;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DatabaseType {
@@ -134,13 +138,62 @@ pub fn database(bytes: &[u8]) -> Result<Vec<DatabaseType>> {
     Ok(types)
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Entry {
     pub reference: i32,
     pub name: String,
     pub string: bool,
     pub group: String,
     pub alias: Option<String>,
+}
+
+pub fn serialize(entries: &[Entry]) -> Result<String> {
+    struct Bounded(Vec<u8>);
+    impl Write for Bounded {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if bytes.len() > crate::LIMIT - self.0.len() {
+                return Err(std::io::Error::other("catalogue supérieur à 64 Mo"));
+            }
+            self.0.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut out = Bounded(Vec::new());
+    serde_json::to_writer(&mut out, entries).map_err(|e| format!("WOLF: {e}."))?;
+    String::from_utf8(out.0).map_err(|_| "WOLF: catalogue UTF-8 invalide.".into())
+}
+
+pub fn validate(text: &str, entries: &[Entry]) -> Result<()> {
+    if text.len() > crate::LIMIT {
+        return Err("WOLF: catalogue supérieur à 64 Mo.".into());
+    }
+    struct Compare<'a>(&'a [Entry]);
+    impl<'de> Visitor<'de> for Compare<'_> {
+        type Value = ();
+        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            f.write_str("catalogue du jeu")
+        }
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<(), A::Error> {
+            for expected in self.0 {
+                if seq.next_element::<Entry>()?.as_ref() != Some(expected) {
+                    return Err(serde::de::Error::custom("le schéma du jeu a changé"));
+                }
+            }
+            if seq.next_element::<Entry>()?.is_some() {
+                return Err(serde::de::Error::custom("champ inattendu"));
+            }
+            Ok(())
+        }
+    }
+    let mut deserializer = serde_json::Deserializer::from_str(text);
+    serde::Deserializer::deserialize_seq(&mut deserializer, Compare(entries))
+        .map_err(|e| format!("WOLF: catalogue invalide : {e}."))?;
+    deserializer
+        .end()
+        .map_err(|_| "WOLF: fin du catalogue invalide.".into())
 }
 
 pub fn variables(system: &[DatabaseType], names: &[Names]) -> Result<Vec<Entry>> {

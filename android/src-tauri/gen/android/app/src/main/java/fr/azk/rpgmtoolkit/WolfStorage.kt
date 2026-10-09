@@ -12,6 +12,9 @@ class WolfStorage(private val context: Context) {
     companion object {
         const val PENDING = ".rpgm-toolkit-wolf-pending.json"
         private const val LIMIT = 64 * 1024 * 1024
+        const val CATALOG_LIMIT = LIMIT
+        const val MAX_CATALOG_ENTRIES = 1_110_000
+        private const val BUNDLE_LIMIT = LIMIT * 4
         val KEYS = listOf("common", "original", "system", "systemNames", "mutable", "mutableNames", "marker", "catalog", "game", "originalGame")
         fun fingerprint(bundle: JSONObject): String {
             val digest = MessageDigest.getInstance("SHA-256")
@@ -31,12 +34,12 @@ class WolfStorage(private val context: Context) {
         } ?: error("Lecture WOLF refusée : ${file.name}")
     }
     private fun hash(bytes: ByteArray)=MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
-    fun write(parent: DocumentFile, name: String, bytes: ByteArray): DocumentFile {
-        require(bytes.size <= LIMIT) { "Fichier WOLF trop volumineux." }
+    fun write(parent: DocumentFile, name: String, bytes: ByteArray, limit: Int = LIMIT): DocumentFile {
+        require(bytes.size <= limit) { "Fichier WOLF trop volumineux." }
         val file=parent.toolkitChild(name) ?: parent.createFile("application/octet-stream",name) ?: error("Création refusée : $name")
         require(file.isFile && file.canWrite()) { "Écriture refusée : $name" }
         context.contentResolver.openOutputStream(file.uri,"wt")?.use { it.write(bytes);it.flush() } ?: error("Écriture refusée : $name")
-        require(read(file).contentEquals(bytes)) { "Vérification échouée : $name" };return file
+        require(read(file,limit).contentEquals(bytes)) { "Vérification échouée : $name" };return file
     }
     fun directory(parent: DocumentFile, name: String): DocumentFile {
         val dir=parent.toolkitChild(name) ?: parent.createDirectory(name) ?: error("Création refusée : $name")
@@ -61,7 +64,7 @@ class WolfStorage(private val context: Context) {
             .put("mutable",encoded(basic.toolkitChild("CDataBase.dat") ?: error("CDataBase.dat absent.")))
             .put("mutableNames",encoded(basic.toolkitChild("CDataBase.project")))
             .put("marker",own?.toolkitChild("meta.json")?.let { read(it,1024*1024).toString(Charsets.UTF_8) } ?: JSONObject.NULL)
-            .put("catalog",own?.toolkitChild("catalog.json")?.let { read(it,8*1024*1024).toString(Charsets.UTF_8) } ?: JSONObject.NULL)
+            .put("catalog",own?.toolkitChild("catalog.json")?.let { read(it,CATALOG_LIMIT).toString(Charsets.UTF_8) } ?: JSONObject.NULL)
             .put("game",encoded(basic.toolkitChild("Game.dat") ?: error("Game.dat absent.")))
             .put("originalGame",encoded(own?.toolkitChild("original-game.dat")))
     }
@@ -70,7 +73,7 @@ class WolfStorage(private val context: Context) {
         return root.toolkitChild(".rpgm-toolkit-backups")?.toolkitChild(name) ?: error("Copie de secours WOLF absente.")
     }
     private fun state(root: DocumentFile, journal: JSONObject): JSONObject {
-        val state=JSONObject(read(backup(root,journal).toolkitChild("state.json") ?: error("État de secours absent."),LIMIT).toString(Charsets.UTF_8))
+        val state=JSONObject(read(backup(root,journal).toolkitChild("state.json") ?: error("État de secours absent."),BUNDLE_LIMIT).toString(Charsets.UTF_8))
         require(fingerprint(state)==journal.getString("fingerprint")) { "Copie de secours WOLF altérée." };return state
     }
     fun inspect(root: DocumentFile): JSObject {
@@ -109,7 +112,7 @@ class WolfStorage(private val context: Context) {
         require(if(args.uninstall)next.getString("game")==originalGame else next.getString("originalGame")==originalGame) { "Copie originale Game.dat incohérente." }
         val id="${System.currentTimeMillis()}-${UUID.randomUUID()}-wolf"
         val backup=directory(directory(root,".rpgm-toolkit-backups"),id)
-        write(backup,"state.json",before.toString().toByteArray(Charsets.UTF_8))
+        write(backup,"state.json",before.toString().toByteArray(Charsets.UTF_8),BUNDLE_LIMIT)
         val journal=JSONObject().put("backup",id).put("fingerprint",args.expected)
         write(backup,"manifest.json",journal.toString().toByteArray(Charsets.UTF_8))
         require(fingerprint(current(root))==args.expected) { "Le jeu a changé pendant la copie de secours." }

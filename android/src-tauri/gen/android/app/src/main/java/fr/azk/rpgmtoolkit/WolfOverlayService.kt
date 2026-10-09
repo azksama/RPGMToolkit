@@ -59,25 +59,39 @@ class WolfOverlayService : Service() {
         val notification=NotificationCompat.Builder(this,"wolf-toolkit").setSmallIcon(android.R.drawable.ic_menu_edit).setContentTitle("WOLF Toolkit").setContentText("Éditeur flottant · Winlator").setOngoing(true).setContentIntent(action("show",1)).addAction(0,"Ouvrir",action("show",1)).addAction(0,"Arrêter",action("stop",2)).build()
         startForeground(190,notification)
         if(!Settings.canDrawOverlays(this) || WolfSession.root==null) { stopSelf();return }
-        try { initialize();running=true }catch(e: Exception) { android.widget.Toast.makeText(this,e.message ?: "Menu WOLF indisponible.",android.widget.Toast.LENGTH_LONG).show();stopSelf() }
+        val root=WolfSession.root!!
+        io.execute {
+            try {
+                prepare(root)
+                handler.post {
+                    if(active!==this@WolfOverlayService)return@post
+                    try { initialize();running=true }catch(e: Exception){initializationFailed(e)}
+                }
+            }catch(e: Exception){handler.post {if(active===this@WolfOverlayService)initializationFailed(e)}}
+        }
     }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if(intent?.action=="stop")stopSelf()
         else if(intent?.action=="show" && ready)expand()
         return START_NOT_STICKY
     }
-    private fun initialize() {
-        val root=WolfSession.root ?: error("Dossier WOLF absent.")
+    private fun initializationFailed(error: Exception) {
+        android.widget.Toast.makeText(this,error.message ?: "Menu WOLF indisponible.",android.widget.Toast.LENGTH_LONG).show();stopSelf()
+    }
+    private fun prepare(root: androidx.documentfile.provider.DocumentFile) {
         storage=WolfStorage(this)
         val own=storage.data(root).toolkitChild("RPGMToolkit") ?: error("Installez le mod WOLF avant d’ouvrir le menu.")
         gameFiles=own
         val marker=JSONObject(storage.read(own.toolkitChild("meta.json") ?: error("Mod WOLF incomplet."),1048576).toString(Charsets.UTF_8))
-        val catalogText=storage.read(own.toolkitChild("catalog.json") ?: error("Catalogue WOLF absent."),8*1024*1024).toString(Charsets.UTF_8)
+        val catalogText=storage.read(own.toolkitChild("catalog.json") ?: error("Catalogue WOLF absent."),WolfStorage.CATALOG_LIMIT).toString(Charsets.UTF_8)
         fun hash(value: String)=MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8)).joinToString(""){"%02x".format(it)}
         require(hash(catalogText)==marker.getString("catalogSha256")) { "Catalogue WOLF modifié." }
-        val catalog=JSONArray(catalogText);require(catalog.length() in 1..20000)
+        val catalog=JSONArray(catalogText);require(catalog.length() in 1..WolfStorage.MAX_CATALOG_ENTRIES) { "Catalogue WOLF vide ou invalide." }
         transport=WolfTransport(storage,own,catalog)
         bootstrap=JSONObject().put("project",hash(root.uri.toString())).put("title",root.name).put("catalog",catalog).put("version",marker.getString("version")).toString()
+    }
+    private fun initialize() {
+        val root=WolfSession.root ?: error("Dossier WOLF absent.")
         windows=getSystemService(WindowManager::class.java)
         bubble=TextView(this).apply {
             text="Toolbox";textSize=12f;gravity=Gravity.CENTER;setTextColor(Color.rgb(229,235,244));setPadding(dp(12),0,dp(12),0)
@@ -171,7 +185,7 @@ class WolfOverlayService : Service() {
     }
     override fun onConfigurationChanged(configuration: Configuration) { super.onConfigurationChanged(configuration);if(::windows.isInitialized){buttonParams.x=(maxX()*positionX/100).toInt();buttonParams.y=(maxY()*positionY/100).toInt();windows.updateViewLayout(bubble,buttonParams)} }
     override fun onDestroy() {
-        running=false;active=null;io.shutdownNow();fileCallback?.onReceiveValue(null);fileCallback=null
+        running=false;active=null;handler.removeCallbacksAndMessages(null);io.shutdownNow();fileCallback?.onReceiveValue(null);fileCallback=null
         if(::windows.isInitialized) {if(::bubble.isInitialized && bubble.isAttachedToWindow)windows.removeView(bubble);if(::panel.isInitialized && panel.isAttachedToWindow)windows.removeView(panel);if(::web.isInitialized){web.removeJavascriptInterface("WolfNative");web.destroy()}}
         WolfSession.root=null;super.onDestroy()
     }

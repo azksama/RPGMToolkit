@@ -84,8 +84,8 @@ fn entries(bundle: &Bundle, events: &CommonEvents) -> Result<Vec<catalog::Entry>
         .transpose()?
         .unwrap_or_default();
     entries.extend(catalog::mutable(&mutable, &names));
-    if entries.is_empty() || entries.len() > 20_000 {
-        return Err("WOLF: 1 à 20 000 champs sont pris en charge.".into());
+    if entries.is_empty() {
+        return Err("WOLF: aucun champ éditable dans ce jeu.".into());
     }
     Ok(entries)
 }
@@ -135,11 +135,7 @@ pub fn inspect(text: &str) -> Result<Checked> {
         if marker.catalog_sha256 != hash(text.as_bytes()) {
             return Err("WOLF: catalogue modifié.".into());
         }
-        let installed: Vec<catalog::Entry> =
-            serde_json::from_str(text).map_err(|_| "WOLF: catalogue invalide.")?;
-        if serde_json::to_vec(&installed).unwrap() != serde_json::to_vec(&entries).unwrap() {
-            return Err("WOLF: le schéma du jeu a changé.".into());
-        }
+        catalog::validate(text, &entries)?;
         if source.events.len() >= events.events.len()
             || source.events.iter().any(|e| {
                 events.data[events.events[e.id as usize].span.clone()]
@@ -214,7 +210,7 @@ pub fn patch(text: &str, uninstall: bool) -> Result<String> {
         let patched = bridge::compile(&source, &checked.entries)?;
         let original_game_bytes = decode(&original_game)?;
         let game = crate::game::background(&original_game_bytes)?;
-        let catalog = serde_json::to_string(&checked.entries).map_err(|e| e.to_string())?;
+        let catalog = catalog::serialize(&checked.entries)?;
         bundle.marker = Some(
             serde_json::to_string(&Marker {
                 format: 1,

@@ -139,3 +139,54 @@ fn malformed_and_overlarge_structures_are_rejected() {
     .string()
     .is_err());
 }
+
+#[test]
+fn large_catalogues_install_update_and_restore_in_both_formats() {
+    for modern in [false, true] {
+        let original = large_bundle(modern, 10_000, 10);
+        let before = install::inspect(&original).unwrap();
+        assert_eq!(before.entries.len(), 100_032);
+        let installed = install::patch(&original, false).unwrap();
+        let checked = install::inspect(&installed).unwrap();
+        assert!(checked.bundle.catalog.as_ref().unwrap().len() > 8 * 1024 * 1024);
+        let events = CommonEvents::read(
+            &base64::Engine::decode(
+                &base64::engine::general_purpose::STANDARD,
+                &checked.bundle.common,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(events.events.len() - before.event_count, 206);
+        assert!(
+            events
+                .events
+                .iter()
+                .map(|e| e.commands.len())
+                .sum::<usize>()
+                < 25_000
+        );
+        assert_eq!(checked.entries.last().unwrap().reference, 1_100_999_909);
+        assert_eq!(checked.entries, before.entries);
+        assert_eq!(install::patch(&installed, false).unwrap(), installed);
+        assert_eq!(
+            install::inspect(&install::patch(&installed, true).unwrap())
+                .unwrap()
+                .fingerprint,
+            before.fingerprint
+        );
+    }
+}
+
+#[test]
+fn catalogue_validation_checks_every_field_and_rejects_extra_data() {
+    let entries = install::inspect(&bundle(true)).unwrap().entries;
+    let text = catalog::serialize(&entries).unwrap();
+    catalog::validate(&text, &entries).unwrap();
+    assert!(catalog::validate(&text, &entries[..entries.len() - 1]).is_err());
+    assert!(catalog::validate("[]", &entries).is_err());
+    assert!(catalog::validate(&(text.clone() + " []"), &entries).is_err());
+    let mut changed = entries.clone();
+    changed.last_mut().unwrap().name = "Different".into();
+    assert!(catalog::validate(&text, &changed).is_err());
+}

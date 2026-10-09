@@ -1,6 +1,17 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {fixture}=require('./runtime-fixture.cjs');
+test('native host record lookup keeps identity and invalidates with catalogue refresh',()=>{
+    const {g,storage}=fixture();
+    const entries=Array.from({length:25000},(_,id)=>({reference:2000000+id,name:'Variable '+id,string:false}));
+    g.ToolkitHost={projectId:'large',session:{},kinds:['variables'],entries:{variables:entries},value:()=>0,known:()=>true};
+    const r=g.createToolkitRuntime(g,storage), last=r.list('variables')[24999];
+    assert.equal(r.record('variables',2024999),last);
+    assert.equal(r.record('variables',999),undefined);
+    g.ToolkitHost.entries.variables=[{reference:2024999,name:'Replacement',string:false}];r.refresh();
+    assert.notEqual(r.record('variables',2024999),last);
+    assert.equal(r.record('variables',2024999).original,'Replacement');
+});
 test('official MV variable setter: search, editing, zero and negative integers, map refresh',()=>{
     const {g,r}=fixture(); const v=r.list('variables')[0];
     assert.equal(r.setValue(v,42),42);assert.equal(g.$gameVariables.value(1),42);assert.ok(g.$gameMap.refreshes>0);

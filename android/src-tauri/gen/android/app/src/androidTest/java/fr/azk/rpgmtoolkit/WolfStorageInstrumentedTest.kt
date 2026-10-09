@@ -19,13 +19,12 @@ class WolfStorageInstrumentedTest {
 
     private fun fixture(version: Int, installed: Boolean) = JSONObject(instrumentation.context.assets.open("wolf-$version-${if (installed) "installed" else "original"}.json").bufferedReader().use { it.readText() })
 
-    private fun inGame(version: Int, test: (DocumentFile, JSONObject) -> Unit) {
+    private fun inGame(version: Int, original: JSONObject = fixture(version, false), test: (DocumentFile, JSONObject) -> Unit) {
         val uri = Uri.parse(InstrumentationRegistry.getArguments().getString("root") ?: error("A writable SAF tree grant is required."))
         val parent = DocumentFile.fromTreeUri(context, uri) ?: error("SAF tree unavailable.")
         val name = "wolf-test-${UUID.randomUUID()}"
         val root = storage.directory(parent, name)
         try {
-            val original = fixture(version, false)
             val basic = storage.directory(storage.directory(root, "Data"), "BasicData")
             for ((key, file) in mapOf("common" to "CommonEvent.dat", "system" to "SysDatabase.dat", "mutable" to "CDataBase.dat", "game" to "Game.dat")) {
                 storage.write(basic, file, Base64.decode(original.getString(key), Base64.NO_WRAP))
@@ -75,5 +74,36 @@ class WolfStorageInstrumentedTest {
         storage.write(storage.data(root).toolkitChild("BasicData")!!, "CommonEvent.dat", byteArrayOf(4, 5, 6))
         try { storage.apply(root, args); fail("Changed game must be refused.") } catch (expected: IllegalArgumentException) { assertTrue(expected.message!!.contains("changé")) }
         assertArrayEquals(byteArrayOf(4, 5, 6), storage.read(storage.data(root).toolkitChild("BasicData")!!.toolkitChild("CommonEvent.dat")!!))
+    }
+
+    @Test fun safLargeCatalogueInstallUpdateAndRestore() {
+        val uri = Uri.parse(InstrumentationRegistry.getArguments().getString("root") ?: error("A writable SAF tree grant is required."))
+        val parent = DocumentFile.fromTreeUri(context, uri) ?: error("SAF tree unavailable.")
+        val fixtures = parent.toolkitChild("fixtures-191")
+        org.junit.Assume.assumeNotNull(fixtures)
+        fun large(name: String) = JSONObject(storage.read(fixtures!!.toolkitChild(name) ?: error("Large fixture missing."),WolfStorage.CATALOG_LIMIT).toString(Charsets.UTF_8))
+        val original = large("wolf-3-original.json")
+        val installed = large("wolf-3-installed.json")
+        val catalog = installed.getString("catalog")
+        assertTrue(catalog.toByteArray(Charsets.UTF_8).size > 8 * 1024 * 1024)
+        assertEquals(100_032,org.json.JSONArray(catalog).length())
+        inGame(3,original) { root, before ->
+            fun apply(bundle: JSONObject, uninstall: Boolean) {
+                val current = JSONObject(storage.inspect(root).getString("registry"))
+                val args = ApplyArgs().apply { registry = bundle.toString(); expected = WolfStorage.fingerprint(current); this.uninstall = uninstall }
+                val result = storage.apply(root,args)
+                assertEquals(WolfStorage.fingerprint(bundle),WolfStorage.fingerprint(JSONObject(result.getString("registry"))))
+                assertNull(root.toolkitChild(WolfStorage.PENDING))
+            }
+            apply(installed,false)
+            apply(installed,false)
+            val pending = root.toolkitChild(".rpgm-toolkit-backups")!!.listFiles().first { it.toolkitChild("state.json")?.let { file -> JSONObject(storage.read(file).toString(Charsets.UTF_8)).optString("catalog")==catalog }==true }
+            val journal = JSONObject(storage.read(pending.toolkitChild("manifest.json")!!).toString(Charsets.UTF_8))
+            storage.write(root,WolfStorage.PENDING,journal.toString().toByteArray())
+            storage.write(storage.data(root).toolkitChild("RPGMToolkit")!!,"catalog.json","[]".toByteArray())
+            storage.restore(root)
+            assertEquals(catalog,JSONObject(storage.inspect(root).getString("registry")).getString("catalog"))
+            apply(before,true)
+        }
     }
 }

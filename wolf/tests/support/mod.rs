@@ -103,6 +103,43 @@ pub fn bundle(modern: bool) -> String {
     })
     .unwrap()
 }
+pub fn large_bundle(modern: bool, rows: u32, columns: u32) -> String {
+    assert!(rows <= 10_000 && columns > 0 && columns <= 100);
+    let mut bundle: install::Bundle = serde_json::from_str(&bundle(modern)).unwrap();
+    let mut data = Vec::new();
+    codec::int(&mut data, 1);
+    data.extend([0xfe, 0xff, 0xff, 0xff]);
+    codec::int(&mut data, 0);
+    codec::int(&mut data, columns);
+    let mut ints = 0;
+    let mut strings = 0;
+    for column in 0..columns {
+        codec::int(
+            &mut data,
+            if column % 2 == 0 {
+                let field = 1000 + ints;
+                ints += 1;
+                field
+            } else {
+                let field = 2000 + strings;
+                strings += 1;
+                field
+            },
+        );
+    }
+    codec::int(&mut data, rows);
+    for row in 0..rows {
+        for column in 0..ints {
+            codec::int(&mut data, row * 100 + column * 2);
+        }
+        for _ in 0..strings {
+            codec::string(&mut data, &format!("row-{row}"), modern).unwrap();
+        }
+    }
+    data.push(0xc1);
+    bundle.mutable = install::encode(&wrap(b'M', modern, &data));
+    serde_json::to_string(&bundle).unwrap()
+}
 pub fn game(modern: bool) -> Vec<u8> {
     let mut bytes = vec![
         0,

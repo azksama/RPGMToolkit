@@ -1,6 +1,6 @@
 /*:
  * @target MZ
- * @plugindesc v1.9.0 (MV/MZ) — Variables, inventaire, acteurs et traductions anglaises.
+ * @plugindesc v1.9.1 (MV/MZ) — Variables, inventaire, acteurs et traductions anglaises.
  * @author RPGM Toolkit
  *
  * @param Hotkey
@@ -34,7 +34,7 @@
  * @text Fermer le Toolkit
  *
  * @help
- * RPGM Toolkit 1.9.0 — RPG Maker MV 1.x / MZ
+ * RPGM Toolkit 1.9.1 — RPG Maker MV 1.x / MZ
  * Copiez ce fichier dans js/plugins, puis activez RPGMToolkit en dernier
  * dans le gestionnaire de plugins. Chargez une partie et appuyez sur F6.
  * Toolbox ouvre le menu global. Choisissez Éditeurs ou un outil de jeu.
@@ -149,7 +149,16 @@ function createToolkitRuntime(g, storage) {
             for (i = 1; i < source.length; i++) if (source[i]) result.push(makeRecord(kind, i, source[i].name, source[i]));
         }
         cache[kind] = result;
+        if (host) {
+            var index = Object.create(null);
+            result.forEach(function(r) { index[r.id] = r; });
+            cache[kind + 'Index'] = index;
+        }
         return result;
+    }
+    function record(kind, id) {
+        var records = list(kind);
+        return host ? cache[kind + 'Index'] && cache[kind + 'Index'][id] : records.filter(function(r) { return r.id === id; })[0];
     }
     function alias(r) { var a = prefs.aliases[r.key]; return a && a.original === r.original ? a.english : ''; }
     function title(r) { return (prefs.english && alias(r)) || r.original || '(sans nom)'; }
@@ -413,7 +422,7 @@ function createToolkitRuntime(g, storage) {
         savePrefs(); return { imported: staged.length, skipped: skipped };
     }
     return {
-        kinds: kinds, prefs: prefs, project: project, list: list, db: db, value: value, title: title, alias: alias,
+        kinds: kinds, prefs: prefs, project: project, list: list, record: record, db: db, value: value, title: title, alias: alias,
         editable: editable, setMany: setMany, freezeMany: freezeMany, enforceFrozen: enforceFrozen,
         isFrozen: function(r) { ensureSession(); return host ? host.frozen(r) : !!frozen[r.key]; }, frozenCount: function() { ensureSession(); return host ? host.frozenCount() : Object.keys(frozen).length; },
         search: search, printable: printable, integer: integer, setValue: setValue, gold: gold, actor: actor, actorAction: actorAction, equip: equip,
@@ -1572,7 +1581,7 @@ function closeToolkit() {
     if (previousFocus && document.contains(previousFocus)) previousFocus.focus();
 }
 function toggleToolkit() { return opened ? closeToolkit() : openToolkit(); }
-g.RPGMToolkit = { version: '1.9.0', open: openToolkit, close: closeToolkit, toggle: toggleToolkit, isOpen: function() { return opened; } };
+g.RPGMToolkit = { version: '1.9.1', open: openToolkit, close: closeToolkit, toggle: toggleToolkit, isOpen: function() { return opened; } };
 var heldCloseKey = null;
 g.addEventListener('keydown', function(event) {
     var key = event.key || ({ 117: 'F6', 118: 'F7', 121: 'F10', 27: 'Escape' }[event.keyCode]);

@@ -83,7 +83,16 @@ function createToolkitRuntime(g, storage) {
             for (i = 1; i < source.length; i++) if (source[i]) result.push(makeRecord(kind, i, source[i].name, source[i]));
         }
         cache[kind] = result;
+        if (host) {
+            var index = Object.create(null);
+            result.forEach(function(r) { index[r.id] = r; });
+            cache[kind + 'Index'] = index;
+        }
         return result;
+    }
+    function record(kind, id) {
+        var records = list(kind);
+        return host ? cache[kind + 'Index'] && cache[kind + 'Index'][id] : records.filter(function(r) { return r.id === id; })[0];
     }
     function alias(r) { var a = prefs.aliases[r.key]; return a && a.original === r.original ? a.english : ''; }
     function title(r) { return (prefs.english && alias(r)) || r.original || '(sans nom)'; }
@@ -347,7 +356,7 @@ function createToolkitRuntime(g, storage) {
         savePrefs(); return { imported: staged.length, skipped: skipped };
     }
     return {
-        kinds: kinds, prefs: prefs, project: project, list: list, db: db, value: value, title: title, alias: alias,
+        kinds: kinds, prefs: prefs, project: project, list: list, record: record, db: db, value: value, title: title, alias: alias,
         editable: editable, setMany: setMany, freezeMany: freezeMany, enforceFrozen: enforceFrozen,
         isFrozen: function(r) { ensureSession(); return host ? host.frozen(r) : !!frozen[r.key]; }, frozenCount: function() { ensureSession(); return host ? host.frozenCount() : Object.keys(frozen).length; },
         search: search, printable: printable, integer: integer, setValue: setValue, gold: gold, actor: actor, actorAction: actorAction, equip: equip,

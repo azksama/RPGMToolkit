@@ -1,4 +1,4 @@
-# WOLF Toolkit 1.9.0
+# WOLF Toolkit 1.9.1
 
 Éditeur mobile flottant pour WOLF RPG Editor 2 et 3 sous Winlator. L’interface réutilise le Toolkit MV/MZ : recherche, favoris, sélection multiple, édition en fenêtre, gel, historique, alias anglais et traductions persistantes.
 
@@ -29,16 +29,19 @@ L’installation conserve `CommonEvent.dat` et `Game.dat`, avec un journal et un
 - Fichiers `Data/BasicData/CommonEvent.dat`, `SysDatabase.dat`, `CDataBase.dat` et `Game.dat` accessibles. Les fichiers `.project` sont facultatifs et améliorent les noms.
 - Formats WOLF 2 Shift-JIS et WOLF 3 UTF-8, y compris les blocs LZ4 reconnus. Une structure inconnue est refusée avant écriture.
 - Android 8 ou supérieur, dossier partagé accessible à l’application et à Winlator, autorisation du menu flottant.
-- 20 000 champs, 128 opérations par échange et 500 valeurs figées simultanément.
+- Les catalogues de plus de 20 000 champs sont acceptés. La taille des fichiers et du catalogue reste bornée à 64 Mo ; 128 opérations par échange et 500 valeurs figées simultanément.
 - Les archives protégées `Data.wolf`, `Data.wolfx` et `BasicData.wolf[x]` ne sont pas prises en charge.
 - La téléportation sûre et le changement de résolution du jeu en portrait restent réservés au module RPG Maker. L’interface WOLF fonctionne en portrait et paysage.
 - Les associations d’inventaire modifient les champs définis dans le profil. Certains jeux imposent une commande spécifique ou recalculent ces champs : leur profil doit être vérifié en jeu.
+
+Après mise à jour depuis la 1.9.0, réactiver les gels d’une ancienne sauvegarde. Les favoris, alias et profils conservent leurs identifiants.
 
 ## Développement
 
 ```sh
 npm run test:wolf
 cargo run --manifest-path wolf/Cargo.toml --example inspect -- <dossier-BasicData-original>
+cargo run --manifest-path wolf/Cargo.toml --example fixture -- <nouveau-dossier> 10000 10
 ```
 
 `inspect` valide l’installation et la restauration en mémoire sans modifier le dossier. `fixture` génère uniquement des données synthétiques dans un nouveau dossier pour les tests Rust et Android. Aucun jeu ni moteur WOLF n’est redistribué.

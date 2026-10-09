@@ -1,3 +1,19 @@
+# Validation 1.9.1
+
+Vérifications du 9 octobre 2026.
+
+- 48 tests JavaScript du Toolkit, 20 tests Rust de l’installateur et 10 tests Rust WOLF réussis ; Clippy WOLF sans avertissement. Les formats WOLF 2/3 passent installation, mise à jour et restauration exacte avec 100 032 champs et un catalogue dépassant 8 Mo.
+- L’adressage est vérifié en simulation jusqu’à 1 110 000 champs, dont les indices supérieurs à un million. Le code de dispatch et les événements de gel restent indépendants du nombre de lignes de la base variable.
+- Sur les moteurs Windows WOLF 2.2961 et 3.729, catalogue de 118 885 champs : 37 échanges par moteur, nombres et textes Unicode, premiers/derniers champs, collisions et réutilisation des gels, plafond de 500 gels, refus des types/indices invalides et sauvegarde native. Les gels numériques et textuels résistent à un événement natif écrivant simultanément ; le dégel laisse ses écritures s’appliquer.
+- Deux parcours Chromium réussis : catalogue de 100 000 champs et profil de 20 001 associations, lecture des seules lignes visibles, édition du dernier champ et gel ; menu partagé en portrait/paysage. Les nouveaux sélecteurs internes sont utilisés par les tests, y compris l’annulation au clavier dans une fenêtre d’édition.
+- 8 tests Kotlin et 3 tests d’instrumentation réussis sur l’émulateur Android Studio API 36.1. Le véritable DocumentsProvider est utilisé pour installer, mettre à jour, récupérer une interruption simulée et désinstaller un catalogue de 100 032 champs, ainsi que les petits catalogues WOLF 2/3.
+- APK release R8 installé sur l’émulateur SDK : grand catalogue ouvert dans le service flottant, changement de catégorie, défilement vertical, recherche du dernier champ et clavier Android. Le retour ferme le clavier et conserve le panneau. Les sélecteurs internes défilent aussi en paysage ; leur fermeture conserve le Toolkit. Ils utilisent le panneau WebView, sans dialogue Android nécessitant une Activity.
+- Signature identique aux versions précédentes ; alignements ZIP et ELF de 16 Ko vérifiés sur ARM64, ARMv7 et x86_64. Modules JavaScript/Ruby et fichiers WebView comparés aux sources, avec exclusion des fixtures de l’APK release.
+
+Les tests Windows et Android sont distincts. Aucun essai sur téléphone physique ou dans Winlator réel n’est revendiqué. Le plafond de 64 Mo pour les fichiers/catalogues reste en place ; les essais complets d’installation portent sur 100 032 champs, l’adressage maximal sur une simulation. Après mise à jour depuis la 1.9.0, les gels des anciennes sauvegardes doivent être réactivés.
+
+---
+
 # Validation 1.9.0
 
 Vérifications du 9 octobre 2026.

@@ -14,6 +14,6 @@ fs.copyFileSync(path.join(base, 'rgss/RPGMToolkit.rb'), path.resolve(base, '../a
 
 const wolfAssets = path.resolve(base, '../android/src-tauri/gen/android/app/src/main/assets/wolf');
 fs.mkdirSync(wolfAssets, {recursive: true});
-for (const file of ['index.html','host.js','wolf.css']) fs.copyFileSync(path.resolve(base, '../wolf/web',file),path.join(wolfAssets,file));
+for (const file of ['index.html','host.js','select.js','wolf.css']) fs.copyFileSync(path.resolve(base, '../wolf/web',file),path.join(wolfAssets,file));
 fs.writeFileSync(path.join(wolfAssets,'toolkit.js'),output);
 fs.copyFileSync(path.resolve(base,'../wolf/THIRD_PARTY_NOTICES.md'),path.join(wolfAssets,'THIRD_PARTY_NOTICES.txt'));

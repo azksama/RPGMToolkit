@@ -12,7 +12,7 @@
     function own(o, key) { return Object.prototype.hasOwnProperty.call(o, key); }
     function escape(value) { return String(value == null ? '' : value).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
     function validateProfile(data) {
-        if (!data || data.format !== profile.format || data.project !== boot.project || !Array.isArray(data.entries) || data.entries.length > 20000) throw new Error('Profil WOLF incompatible.');
+        if (!data || data.format !== profile.format || data.project !== boot.project || !Array.isArray(data.entries) || data.entries.length > catalogue.length) throw new Error('Profil WOLF incompatible.');
         var seen = Object.create(null);
         data.entries.forEach(function(p) {
             if (!p || !refs[p.reference] || !own(roles,p.role) || typeof p.label !== 'string' || p.label.length > 2000 || !/^(ally|enemy)$/.test(p.team) || typeof p.target !== 'string' || p.target.length > 100 || seen[p.reference]) throw new Error('Champ du profil invalide.');
@@ -41,7 +41,7 @@
     function record(entry, kind) {
         kind=kind || (entry.reference>=1100000000?'database':entry.string?'strings':'variables');
         if(api && api.runtime()) {
-            var current=api.runtime().list(kind).find(function(r){return r.id===entry.reference;});
+            var current=api.runtime().record(kind,entry.reference);
             if(current)return current;
         }
         return {kind:kind,id:entry.reference,key:kind+':'+entry.reference,original:entry.name,data:entry};
@@ -158,7 +158,7 @@
         freeze:function(records,enabled){var entries=dedupe(records);enqueue(entries.map(function(e){return {index:e.index,action:enabled?3:4};}));entries.forEach(function(e){locks[e.index]=enabled;});},
         visible:function(records){if(document.querySelector('.rt-modal:not([hidden]) .wolf-profile-list'))return;visible=dedupe(records);if(active && !flight && !queue.length)read(visible.filter(function(e){return !own(values,e.index);}));},
         attach:function(value){api=value;},
-        close:function(){active=false;visible=[];g.WolfNative.close();},
+        close:function(){active=false;visible=[];g.WolfSelect.close();g.WolfNative.close();},
         show:function(){active=true;api.open();read(visible);},
         back:function(){g.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));g.dispatchEvent(new KeyboardEvent('keyup',{key:'Escape',bubbles:true}));},
         answer:function(answer){
