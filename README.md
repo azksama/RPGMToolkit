@@ -1,6 +1,8 @@
 # RPGM Toolkit
 
-Mod intégré pour RPG Maker XP, VX, VX Ace, MV et MZ et installateur Android **Rust + Tauri 2**, version **1.8.1** (mod inclus **1.8.1**).
+Mod intégré pour RPG Maker XP, VX, VX Ace, MV et MZ, éditeur WOLF pour Winlator et installateur Android **Rust + Tauri 2**, version **1.9.0**.
+
+Le [guide WOLF](wolf/README.md) décrit le menu flottant, les profils d’objets/HP/stats et les formats pris en charge. Les dossiers RPG Maker peuvent contenir directement `js/` et `data/`, sans `www/`, ou se trouver dans des sous-dossiers comme `Data/`.
 
 Recherche et édition de variables, alias anglais pour l’affichage, recherche et ajout d’objets, armes et armures. L’application Android détecte un jeu fourni en ZIP ou en dossier, installe le mod embarqué, permet sa mise à jour et sa désinstallation, avec sauvegardes et restauration.
 
@@ -11,6 +13,7 @@ Recherche et édition de variables, alias anglais pour l’affichage, recherche 
 - `plugin/rgss/` : variante Ruby RGSS1/2/3 et tests de simulation.
 - `plugin/` : installateur Windows, démonstration et documentation d’utilisation.
 - `android/` : application React/TypeScript, moteur Rust et accès Android SAF en Kotlin.
+- `wolf/` : codec WOLF, pont de common events, interface Winlator et tests.
 - `plugin/tests/` et `android/tests/` : tests du mod, installateur et régression du chargement MV/MZ.
 
 ## Développement
@@ -45,13 +48,13 @@ Licence MIT. Application indépendante de RPG Maker et de JoiPlay.
 
 Après compilation du frontend Android, `npm run test:mobile` à la racine vérifie les formats mobiles et l’accessibilité. Voir [les versions](CHANGELOG.md).
 
-Le [guide Toolbox 1.8.1](plugin/TOOLBOX.md) décrit les sous-menus, outils de jeu, traductions en parallèle et la mise à jour.
+Le [guide Toolbox](plugin/TOOLBOX.md) décrit les sous-menus, outils de jeu, traductions en parallèle et la mise à jour.
 
 ## Bibliothèque de jeux Android
 
 Choisir **Dossiers de jeux** pour analyser un jeu ou un dossier parent. **Ajouter un dossier** ajoute une autre sélection Android à la liste, sans doublon. Les sous-dossiers sont parcourus jusqu’à 32 niveaux et 4 000 dossiers, avec 500 jeux maximum ; toute limite ou erreur de lecture est signalée.
 
-Chaque jeu indique l’action prévue : installation, mise à jour, réparation, déjà à jour ou incompatibilité. La détection couvre XP, VX, VX Ace, MV 1.x et MZ 1.x. Les scripts RGSS, les registres JavaScript et les droits d’écriture sont contrôlés. Elle ne garantit pas l’absence de conflits avec tous les plugins tiers.
+Chaque jeu indique l’action prévue : installation, mise à jour, réparation, déjà à jour ou incompatibilité. La détection couvre XP, VX, VX Ace, MV 1.x, MZ 1.x et WOLF 2/3 avec fichiers accessibles. Les scripts RGSS, les registres JavaScript, les structures WOLF et les droits d’écriture sont contrôlés. Elle ne garantit pas l’absence de conflits avec tous les scripts tiers.
 
 Sélectionner les jeux puis **Installer / mettre à jour**. Les jeux identiques au mod choisi sont laissés intacts. Les fichiers sont revérifiés avant écriture ; les sauvegardes de secours et la restauration sont indépendantes pour chaque jeu. Une erreur n’arrête pas les autres jeux. La désinstallation groupée est également disponible. Les ZIP restent traités un par un.
 
@@ -59,6 +62,6 @@ Sélectionner les jeux puis **Installer / mettre à jour**. Les jeux identiques 
 
 Voir [le guide RGSS](plugin/rgss/README.md) pour XP/VX/VX Ace. Les fichiers `plugins.js` acceptent les littéraux JavaScript usuels : clés sans guillemets, chaînes simples, commentaires et virgules finales. Le fichier n’est jamais exécuté pendant son analyse. Les expressions calculées restent refusées.
 
-L’installateur PowerShell concerne MV/MZ. L’APK inclut les deux variantes et sélectionne automatiquement celle du moteur détecté. RPG Maker 2000/2003 ne sont pas pris en charge.
+L’installateur PowerShell concerne MV/MZ. L’APK inclut les modules JavaScript, Ruby et WOLF et sélectionne automatiquement celui du moteur détecté. RPG Maker 2000/2003 ne sont pas pris en charge.
 
 Le mode **Portrait plein écran** de la 1.8 concerne MV/MZ ; la variante RGSS reste en 1.7.0. Voir [les réglages et limites](plugin/TOOLBOX.md#portrait-plein-écran--mvmz).

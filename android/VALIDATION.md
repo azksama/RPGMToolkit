@@ -1,3 +1,19 @@
+# Validation 1.9.0
+
+Vérifications du 9 octobre 2026.
+
+- 47 tests JavaScript du Toolkit, 24 assertions PowerShell, 20 tests Rust de l’installateur et 6 tests Rust des formats WOLF réussis. Les tests ZIP couvrent installation, mise à jour, désinstallation, conservation des originaux et refus des archives WOLF protégées.
+- Parcours Chromium du menu WOLF en portrait et paysage : recherche, édition, profils d’inventaire et de ressources, booléens, actions groupées, gel, historique, traductions persistantes, pagination et fermeture des fenêtres. Une lecture en échec conserve les lignes et permet le défilement vertical sans boucle de requêtes. Le pont natif est simulé dans ces parcours.
+- 8 tests Kotlin unitaires et 2 tests d’instrumentation Android réussis. L’instrumentation utilise une compilation debug signée et le véritable DocumentsProvider sur l’émulateur Android Studio API 36.1 : installation/mise à jour/désinstallation WOLF 2/3, récupération d’une interruption simulée, refus de fichiers modifiés et conservation des sauvegardes.
+- Exécution sur les moteurs Windows WOLF 2.2961 et 3.729 avec des copies des projets de démonstration officiels : lecture/écriture de nombres et chaînes Unicode, base variable, gel et dégel malgré des écritures concurrentes, sauvegarde native et chargement. Le chargement a été vérifié sur une carte de test sans événement bloquant ; un chargement bloqué a été annulé sans exécution ultérieure.
+- Le routage No Clip est accepté par les deux moteurs et son état est relu. Le déplacement à travers une collision réelle n’a pas été vérifié.
+- APK release universel recompilé avec R8, installé sur l’émulateur SDK ; installation groupée des deux fixtures WOLF, autorisations du menu flottant et des notifications, menu partagé, défilement et clavier Android contrôlés. Les marges système et le retour depuis le clavier ont été corrigés pendant ce contrôle.
+- Signature identique aux versions précédentes, alignements ZIP et ELF de 16 Ko vérifiés sur ARM64, ARMv7 et x86_64. Modules JavaScript/Ruby et fichiers WebView WOLF comparés aux sources ; aucun moteur ou jeu WOLF n’est redistribué.
+
+Les essais natifs Windows et Android sont distincts. Aucun téléphone physique, jeu commercial ou fonctionnement réel dans Winlator n’est revendiqué. Les profils associent les champs du jeu aux objets, HP et stats ; ils doivent être vérifiés pour chaque système personnalisé. Les archives WOLF protégées, la téléportation WOLF et la modification de résolution du jeu WOLF ne sont pas prises en charge. Les fonctions RPG Maker correspondantes restent disponibles.
+
+---
+
 # Validation 1.8.1
 
 10 tests portrait passent, dont une page mobile simulée avec un viewport de largeur 1280, restauration, images verticales, exclusion des icônes et fonds. Tests Chromium de bureau avec émulation mobile ; aucun test téléphone/JoiPlay réel.

@@ -21,6 +21,7 @@ android {
         applicationId = "fr.azk.rpgmtoolkit"
         minSdk = 26
         targetSdk = 36
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
     }
@@ -34,6 +35,7 @@ android {
     }
     buildTypes {
         getByName("debug") {
+            if (providers.gradleProperty("toolkitSignedDebug").orNull == "true") signingConfig = signingConfigs.getByName("toolkitRelease")
             manifestPlaceholders["usesCleartextTraffic"] = "true"
             isDebuggable = true
             isJniDebuggable = true

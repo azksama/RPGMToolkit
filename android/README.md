@@ -1,4 +1,4 @@
-# RPGM Toolkit Android — 1.8.1
+# RPGM Toolkit Android — 1.9.0
 
 Application Android Rust + Tauri 2, interface React/TypeScript, accès aux fichiers par un plugin Kotlin Storage Access Framework. Les modules MV/MZ `RPGMToolkit.js` et XP/VX/VX Ace `RPGMToolkit.rb` sont embarqués dans la bibliothèque Rust.
 
@@ -10,7 +10,7 @@ Application Android Rust + Tauri 2, interface React/TypeScript, accès aux fichi
 4. Choisir **Installer le mod**, ou **Désinstaller le mod** si le Toolkit est présent.
 5. Pour un ZIP, enregistrer le nouveau fichier, l’extraire, puis sélectionner le jeu extrait dans JoiPlay. Pour un dossier, le jeu est modifié directement et peut être rouvert.
 
-Le mod est déjà inclus. Le lien **Choisir un autre ZIP du mod** accepte une archive contenant exactement un `RPGMToolkit.js`, pour installer une autre version de ce même mod. Cet import concerne MV/MZ ; RGSS utilise le module Ruby inclus.
+Le mod est déjà inclus. Le lien **Choisir un autre ZIP du mod** accepte une archive contenant exactement un `RPGMToolkit.js`, pour installer une autre version de ce même mod. Cet import concerne MV/MZ ; RGSS et WOLF utilisent leurs modules inclus.
 
 ## Sauvegardes et récupération
 
@@ -71,4 +71,9 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib --locked
 
 Application indépendante de RPG Maker et de JoiPlay. Voir le rapport de validation livré pour distinguer les tests automatisés, les essais sur émulateur et la validation sur un jeu réel.
 
-La sélection de dossiers accepte une bibliothèque contenant plusieurs jeux et des ajouts successifs de dossiers. Le mod embarqué reste en version 1.8.1. Voir le guide bibliothèque du README principal.
+La sélection de dossiers accepte une bibliothèque contenant plusieurs jeux et des ajouts successifs de dossiers. Le mod embarqué reste en version 1.9.0. Voir le guide bibliothèque du README principal.
+
+
+## WOLF / Winlator
+
+Voir [le guide WOLF](../wolf/README.md). Le dossier doit être partagé avec Winlator. Après installation, **Ouvrir l’éditeur** lance le menu Android flottant ; autoriser l’affichage par-dessus les applications. Les profils définissent les objets, HP et stats propres au jeu. Les archives WOLF protégées restent refusées.

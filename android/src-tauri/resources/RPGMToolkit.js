@@ -1,6 +1,6 @@
 /*:
  * @target MZ
- * @plugindesc v1.8.1 (MV/MZ) — Variables, inventaire, acteurs et traductions anglaises.
+ * @plugindesc v1.9.0 (MV/MZ) — Variables, inventaire, acteurs et traductions anglaises.
  * @author RPGM Toolkit
  *
  * @param Hotkey
@@ -34,7 +34,7 @@
  * @text Fermer le Toolkit
  *
  * @help
- * RPGM Toolkit 1.8.1 — RPG Maker MV 1.x / MZ
+ * RPGM Toolkit 1.9.0 — RPG Maker MV 1.x / MZ
  * Copiez ce fichier dans js/plugins, puis activez RPGMToolkit en dernier
  * dans le gestionnaire de plugins. Chargez une partie et appuyez sur F6.
  * Toolbox ouvre le menu global. Choisissez Éditeurs ou un outil de jeu.
@@ -67,7 +67,8 @@ if (g.RPGMToolkit) return;
 /* Runtime adapter. ES5 syntax for RPG Maker MV and MZ. */
 function createToolkitRuntime(g, storage) {
     'use strict';
-    var kinds = ['variables', 'switches', 'items', 'weapons', 'armors', 'actors', 'skills', 'states', 'selfSwitches'];
+    var host = g.ToolkitHost;
+    var kinds = host ? host.kinds : ['variables', 'switches', 'items', 'weapons', 'armors', 'actors', 'skills', 'states', 'selfSwitches'];
     var cache = {}, history = [], redo = [], log = [], baseline = {}, session = null;
     var prefs = { english: true, source: 'ja', favorites: {}, aliases: {}, settings: { language:'fr', fontSize:13, scrollbarWidth:24, pageSize:0, hotkey:'', showButton:true, safeTeleport:true, buttonX:0, buttonY:0, bottomClose:false, portrait:false, portraitPictures:true } };
     prefs.travel = { places:[], last:null };
@@ -82,7 +83,7 @@ function createToolkitRuntime(g, storage) {
         for (i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = (h + (h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24)) >>> 0; }
         return h.toString(16);
     }
-    var project = hash(String(g.location && g.location.pathname || '') + '|' + (g.$dataSystem && g.$dataSystem.gameTitle || ''));
+    var project = hash(host ? host.projectId : String(g.location && g.location.pathname || '') + '|' + (g.$dataSystem && g.$dataSystem.gameTitle || ''));
     var storageKey = 'rpgm-toolkit-v1:' + project;
     function savePrefs() {
         try { storage.setItem(storageKey, JSON.stringify(prefs)); storageWarning = false; }
@@ -108,7 +109,8 @@ function createToolkitRuntime(g, storage) {
         Object.keys(saved.aliases || {}).forEach(function(k) { if (/^[a-zA-Z]+:[0-9]+(?:\.[0-9]+\.[A-D])?$/.test(k) && validAlias(saved.aliases[k])) prefs.aliases[k] = saved.aliases[k]; });
     } catch (e) { storageWarning = true; }
     function ensureSession() {
-        if (session !== g.$gameVariables) { removeHooks(); frozen = {}; session = g.$gameVariables; history = []; redo = []; log = []; baseline = {}; cache = {}; }
+        var current = host ? host.session : g.$gameVariables;
+        if (session !== current) { removeHooks(); frozen = {}; session = current; history = []; redo = []; log = []; baseline = {}; cache = {}; }
     }
     function db(kind) {
         return { items: g.$dataItems, weapons: g.$dataWeapons, armors: g.$dataArmors, actors: g.$dataActors, skills: g.$dataSkills, states: g.$dataStates }[kind];
@@ -129,7 +131,9 @@ function createToolkitRuntime(g, storage) {
         }
         if (cache[kind]) return cache[kind];
         var result = [], source, i;
-        if (kind === 'variables' || kind === 'switches') {
+        if (host) {
+            (host.entries[kind] || []).forEach(function(entry) { result.push(makeRecord(kind, entry.reference, entry.name, entry)); });
+        } else if (kind === 'variables' || kind === 'switches') {
             source = g.$dataSystem[kind] || [];
             for (i = 1; i < source.length; i++) result.push(makeRecord(kind, i, source[i]));
         } else if (kind === 'selfSwitches') {
@@ -150,6 +154,7 @@ function createToolkitRuntime(g, storage) {
     function alias(r) { var a = prefs.aliases[r.key]; return a && a.original === r.original ? a.english : ''; }
     function title(r) { return (prefs.english && alias(r)) || r.original || '(sans nom)'; }
     function value(r) {
+        if (host) return host.value(r);
         if (r.kind === 'variables') { var raw = g.$gameVariables._data && g.$gameVariables._data[r.id]; return typeof raw === 'boolean' ? raw : g.$gameVariables.value(r.id); }
         if (r.kind === 'switches') return g.$gameSwitches.value(r.id);
         if (r.kind === 'selfSwitches') return g.$gameSelfSwitches.value(r.data);
@@ -164,17 +169,17 @@ function createToolkitRuntime(g, storage) {
     }
     function capture() {
         baseline = {};
-        ['variables', 'switches', 'selfSwitches'].forEach(function(kind) { list(kind).forEach(function(r) { baseline[r.key] = printable(value(r)); }); });
+        (host ? kinds : ['variables', 'switches', 'selfSwitches']).forEach(function(kind) { list(kind).forEach(function(r) { if (!host || host.known(r)) baseline[r.key] = printable(value(r)); }); });
         return Object.keys(baseline).length;
     }
     function changed(r) { return own(baseline, r.key) && baseline[r.key] !== printable(value(r)); }
     function search(kind, query, filter) {
         var tokens = normal(query).trim().split(/\s+/).filter(Boolean);
         return list(kind).filter(function(r) {
-            if (filter === 'int' && (typeof value(r) !== 'number' || !isFinite(value(r)) || Math.floor(value(r)) !== value(r))) return false;
+            if (filter === 'int' && (host ? r.data.string : (typeof value(r) !== 'number' || !isFinite(value(r)) || Math.floor(value(r)) !== value(r)))) return false;
             if (filter === 'bool' && typeof value(r) !== 'boolean') return false;
-            if (filter === 'text' && typeof value(r) !== 'string') return false;
-            if (filter === 'frozen' && !frozen[r.key]) return false;
+            if (filter === 'text' && (host ? !r.data.string : typeof value(r) !== 'string')) return false;
+            if (filter === 'frozen' && !(host ? host.frozen(r) : frozen[r.key])) return false;
             if (filter === 'favorites' && !prefs.favorites[r.key]) return false;
             if (filter === 'named' && !r.original.trim()) return false;
             if (filter === 'active' && !value(r)) return false;
@@ -216,9 +221,10 @@ function createToolkitRuntime(g, storage) {
     function assertRecord(r) {
         if (!r || list(r.kind).indexOf(r) < 0) throw new Error('Entrée périmée. Actualisez la liste.');
     }
-    function editable(r) { return /^(variables|switches|selfSwitches|items|weapons|armors)$/.test(r.kind) && /^(number|string|boolean)$/.test(typeof value(r)); }
+    function editable(r) { return host ? host.editable(r) : /^(variables|switches|selfSwitches|items|weapons|armors)$/.test(r.kind) && /^(number|string|boolean)$/.test(typeof value(r)); }
     function validateValue(r, next) {
         assertRecord(r);
+        if (host) return host.validate(r, next);
         if (!editable(r)) throw new Error('Cette entrée est en consultation : utilisez ses commandes spécifiques.');
         if (r.kind === 'variables') {
             if (typeof next === 'number') return integer(next, -9007199254740991, 9007199254740991);
@@ -235,7 +241,8 @@ function createToolkitRuntime(g, storage) {
     function writeValue(r, next) {
         var previous = writing; writing = true;
         try {
-            if (r.kind === 'variables') g.$gameVariables.setValue(r.id, next);
+            if (host) host.write(r, next);
+            else if (r.kind === 'variables') g.$gameVariables.setValue(r.id, next);
             else if (r.kind === 'switches') g.$gameSwitches.setValue(r.id, next);
             else if (r.kind === 'selfSwitches') g.$gameSelfSwitches.setValue(r.data, next);
             else g.$gameParty.gainItem(r.data, next - value(r), false);
@@ -297,14 +304,16 @@ function createToolkitRuntime(g, storage) {
     function freezeMany(records, active) {
         records = uniqueRecords(records);
         if (active) records.forEach(function(r) { validateValue(r, value(r)); });
-        var added = records.filter(function(r) { return !frozen[r.key]; }).length;
-        if (active && Object.keys(frozen).length + added > 500) throw new Error('Maximum : 500 valeurs figées simultanément.');
+        var added = records.filter(function(r) { return !(host ? host.frozen(r) : frozen[r.key]); }).length;
+        if (active && (host ? host.frozenCount() : Object.keys(frozen).length) + added > 500) throw new Error('Maximum : 500 valeurs figées simultanément.');
         records.forEach(function(r) { if (active) frozen[r.key] = { record:r, value:value(r) }; else delete frozen[r.key]; });
-        if (Object.keys(frozen).length) installHooks(); else removeHooks();
+        if (host) host.freeze(records, active);
+        else if (Object.keys(frozen).length) installHooks(); else removeHooks();
         return records.length;
     }
     function enforceFrozen() {
         ensureSession();
+        if (host) return;
         Object.keys(frozen).forEach(function(key) {
             var lock = frozen[key];
             if (value(lock.record) !== lock.value) {
@@ -406,12 +415,14 @@ function createToolkitRuntime(g, storage) {
     return {
         kinds: kinds, prefs: prefs, project: project, list: list, db: db, value: value, title: title, alias: alias,
         editable: editable, setMany: setMany, freezeMany: freezeMany, enforceFrozen: enforceFrozen,
-        isFrozen: function(r) { ensureSession(); return !!frozen[r.key]; }, frozenCount: function() { ensureSession(); return Object.keys(frozen).length; },
+        isFrozen: function(r) { ensureSession(); return host ? host.frozen(r) : !!frozen[r.key]; }, frozenCount: function() { ensureSession(); return host ? host.frozenCount() : Object.keys(frozen).length; },
         search: search, printable: printable, integer: integer, setValue: setValue, gold: gold, actor: actor, actorAction: actorAction, equip: equip,
         undo: function() { undoAction(false); }, redo: function() { undoAction(true); },
         canUndo: function() { ensureSession(); return history.length > 0; }, canRedo: function() { ensureSession(); return redo.length > 0; },
         log: function() { ensureSession(); return log; }, capture: capture, changed: changed,
         refresh: function() { ensureSession(); cache = {}; }, savePrefs: savePrefs, storageWarning: function() { return storageWarning; },
+        clearHistory: function() { history = []; redo = []; },
+        acceptBaseline: function(records) { records.forEach(function(r) { if (!own(baseline,r.key)) baseline[r.key]=printable(value(r)); }); },
         setAlias: setAlias, setAliases: setAliases, clearAliases: clearAliases, importAliases: importAliases,
         exportAliases: function() {
             return { format: 'rpgm-toolkit-translations-v1', project: project, entries: Object.keys(prefs.aliases).map(function(k) { return { key: k, original: prefs.aliases[k].original, english: prefs.aliases[k].english }; }) };
@@ -905,6 +916,8 @@ function createToolkitPortrait(g, runtime) {
 }
 
 var toolkitEnglish = {
+    'Sauvegardes Toolkit':'Toolkit saves','Charger la sauvegarde':'Load save','Sauvegarde chargée.':'Save loaded.',
+    'Base variable':'Mutable database','Textes':'Strings','Profil':'Profile','Actualisation':'Refresh interval','Rôle':'Role','Interrupteur':'Switch','Objet':'Item','Arme':'Weapon','Armure':'Armor','Argent':'Gold','Nom':'Name','Équipe':'Team','Alliés':'Allies','ID du maximum':'Maximum field ID','Icône':'Icon','HP figés suivant le profil':'Freeze HP using the profile','Champs associés au profil':'Profile fields','Sauvegarde Toolkit':'Toolkit save','Objets, ressources et stats du jeu':'Game items, resources and stats','Aucun champ associé.':'No mapped fields.','Lecture des HP en cours.':'Reading HP.','Attendez la lecture du jeu.':'Wait for game values.','WOLF ne répond pas.':'WOLF is not responding.','Profil enregistré.':'Profile saved.','Profil importé.':'Profile imported.','En cours…':'Working…','Appliqué.':'Applied.',
     'Portraits en bas':'Portraits at the bottom',
     'Portrait plein écran':'Full-screen portrait','Activez ce mode depuis la carte, hors événement.':'Enable this mode on the map, outside an event.','Mode portrait disponible sur MV/MZ.':'Portrait mode is available on MV/MZ.',
     'Nom de l’emplacement':'Location name','Enregistrer l’emplacement actuel':'Save current location','Dernier emplacement':'Last location','Emplacement enregistré.':'Location saved.',
@@ -1002,6 +1015,7 @@ function applySettings() {
     if(launch){launch.setAttribute('aria-label',(settings.language==='en'?'Open Toolbox':'Ouvrir Toolbox')+' ('+hotkey+')');launch.textContent='Toolbox · '+hotkey;launch.hidden=opened||!settings.showButton||!allowed();}
     root.classList.toggle('rt-close-recall',settings.bottomClose);
     positionLauncher(); var recall=$('.rt-bottom-close'); if(recall)recall.hidden=!settings.bottomClose;
+    if (toolkitHost) toolkitHost.settings(settings);
     localizeToolkit();fitToolboxModal();if(typeof refreshToolkitScroll==='function')refreshToolkitScroll();
 }
 function installSettings() {
@@ -1136,6 +1150,7 @@ function installToolkitScrollbars() {
 }
 
 /* DOM overlay; no engine assets, dependencies or timers while closed. */
+var toolkitHost = g.ToolkitHost;
 var toolkitParams = g.PluginManager && g.PluginManager.parameters('RPGMToolkit') || {};
 var hotkey = /^(F6|F7|F10)$/.test(toolkitParams.Hotkey || '') ? toolkitParams.Hotkey : 'F6';
 var pageSize = Math.max(20, Math.min(80, Number(toolkitParams.PageSize) || 60));
@@ -1143,7 +1158,7 @@ var portraitMode, gameTools, runtime, translator, root, launch, previousFocus, o
 var opened = false, dirty = false, tab = 'variables', query = '', filter = 'all', page = 0, selected = null, found = [];
 var chosenActor = '', checked = {}, modalMode = '', modalFocus = null, exactValue = '';
 function picked() { return Object.keys(checked).map(function(k) { return checked[k]; }); }
-var labels = { favorites: 'Favoris', variables: 'Variables', switches: 'Interrupteurs', selfSwitches: 'Interr. locaux', items: 'Objets', weapons: 'Armes', armors: 'Armures', actors: 'Acteurs', skills: 'Compétences', states: 'États', party: 'Partie', translations: 'Traductions', history: 'Historique' };
+var labels = { favorites: 'Favoris', variables: 'Variables', switches: 'Interrupteurs', selfSwitches: 'Interr. locaux', items: 'Objets', weapons: 'Armes', armors: 'Armures', actors: 'Acteurs', skills: 'Compétences', states: 'États', strings: 'Textes', database: 'Base variable', resources: 'HP / MP', stats: 'Stats', party: 'Partie', translations: 'Traductions', history: 'Historique' };
 function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function(c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 function $(selector) { return root.querySelector(selector); }
 function button(text, action, cls) { return '<button type="button" data-action="' + action + '" class="' + (cls || '') + '">' + text + '</button>'; }
@@ -1153,6 +1168,7 @@ function say(message, error) { if (root) { if (modalMode) { $('.rt-modal-status'
 function guarded(fn) { try { return fn(); } catch (e) { say(e.message || String(e), true); return undefined; } }
 function clearInput() { if (g.Input) g.Input.clear(); if (g.TouchInput) g.TouchInput.clear(); if (g.$gameTemp && g.$gameTemp.clearDestination) g.$gameTemp.clearDestination(); }
 function allowed() {
+    if (toolkitHost) return toolkitHost.isConnected();
     var manager = g.SceneManager, scene = manager && manager._scene;
     if (!(g.$dataSystem && g.$gameVariables && g.$gameParty && scene && ((g.Scene_Map && scene instanceof g.Scene_Map) || (g.Scene_Battle && scene instanceof g.Scene_Battle)))) return false;
     if (manager.isSceneChanging()) return false;
@@ -1239,7 +1255,7 @@ function buildRoot() {
     });
 }
 function renderNav() {
-    $('#rt-category').innerHTML = Object.keys(labels).filter(function(k) { return k !== 'translations'; }).map(function(k) { return '<option value="' + k + '">' + esc(labels[k]) + '</option>'; }).join('');
+    $('#rt-category').innerHTML = (toolkitHost ? ['favorites'].concat(runtime.kinds) : Object.keys(labels).filter(function(k) { return k !== 'translations'; })).map(function(k) { return '<option value="' + k + '">' + esc(labels[k]) + '</option>'; }).join('');
     $('#rt-category').value = tab;
 }
 function render() {
@@ -1272,6 +1288,7 @@ function lockIcon(locked) {
     return '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5"/>' + (locked ? '<path d="M5 7V5a3 3 0 016 0v2"/>' : '<path d="M5 7V5a3 3 0 015-2"/>') + '<path d="M8 10v2"/></svg>';
 }
 function rowValue(r) {
+    if (toolkitHost && !toolkitHost.known(r)) return '…';
     var v = runtime.printable(runtime.value(r));
     if (r.kind === 'actors') return 'Niv. ' + v;
     if (r.kind === 'skills') return v + ' MP';
@@ -1288,13 +1305,14 @@ function renderList() {
         var index = start+i, v = runtime.value(r), edit = runtime.editable(r), frozen = runtime.isFrozen(r), name = runtime.title(r), quick = '';
         if (edit && typeof v === 'number') quick = rowAction('−99','minus99',index,'Retirer 99 : '+name) + rowAction('+99','plus99',index,'Ajouter 99 : '+name);
         else if (edit && typeof v === 'boolean') quick = rowAction(v ? 'false' : 'true','toggle-bool',index,'Basculer : '+name);
-        return '<li class="rt-row' + (frozen ? ' rt-frozen' : '') + '"><label class="rt-row-check"><input type="checkbox" data-check-index="' + index + '" aria-label="Sélectionner : ' + esc(name) + '"' + (checked[r.key] ? ' checked' : '') + '></label><button type="button" class="rt-select" data-action="select" data-index="' + index + '" title="' + esc(name+' · #'+r.id) + '">' + (r.data && typeof r.data.iconIndex === 'number' ? '<canvas class="rt-icon" width="32" height="32" data-icon="' + r.data.iconIndex + '" aria-hidden="true"></canvas>' : '') + '<span class="rt-row-id">#' + esc(r.id) + '</span><span class="rt-row-title">' + esc(name) + '</span></button><span class="rt-row-value" title="' + esc(String(v)) + '">' + esc(typeof v === 'boolean' ? String(v) : rowValue(r)) + '</span><div class="rt-row-actions">' + quick + rowAction(runtime.prefs.favorites[r.key] ? '★' : '☆','star',index,'Favori : '+name,!!runtime.prefs.favorites[r.key]) + rowAction(lockIcon(frozen),'freeze',index,(frozen?'Libérer : ':'Figer : ')+name,frozen,!edit) + rowAction('✎','select',index,'Éditer : '+name) + '</div></li>';
+        return '<li class="rt-row' + (frozen ? ' rt-frozen' : '') + '"><label class="rt-row-check"><input type="checkbox" data-check-index="' + index + '" aria-label="Sélectionner : ' + esc(name) + '"' + (checked[r.key] ? ' checked' : '') + '></label><button type="button" class="rt-select" data-action="select" data-index="' + index + '" title="' + esc(name+' · #'+r.id) + '">' + (toolkitHost && toolkitHost.icon(r) ? '<img class="rt-icon" width="24" height="24" src="'+esc(toolkitHost.icon(r))+'" alt="">' : r.data && typeof r.data.iconIndex === 'number' ? '<canvas class="rt-icon" width="32" height="32" data-icon="' + r.data.iconIndex + '" aria-hidden="true"></canvas>' : '') + '<span class="rt-row-id">#' + esc(r.id) + '</span><span class="rt-row-title">' + esc(name) + '</span></button><span class="rt-row-value" title="' + esc(String(v)) + '">' + esc(typeof v === 'boolean' ? String(v) : rowValue(r)) + '</span><div class="rt-row-actions">' + quick + rowAction(runtime.prefs.favorites[r.key] ? '★' : '☆','star',index,'Favori : '+name,!!runtime.prefs.favorites[r.key]) + rowAction(lockIcon(frozen),'freeze',index,(frozen?'Libérer : ':'Figer : ')+name,frozen,!edit) + rowAction('✎','select',index,'Éditer : '+name) + '</div></li>';
     }).join('') : '<li class="rt-empty">Aucun résultat. Changez la recherche ou le filtre.</li>';
     $('#rt-count').textContent = found.length ? (start+1)+'–'+(start+rows.length)+' / '+found.length.toLocaleString() : '0 résultat';
     $('#rt-page-number').value = page+1; $('#rt-page-number').max = Math.max(1,Math.ceil(found.length/pageSize));
     $('#rt-page-total').textContent = '/ '+Math.max(1,Math.ceil(found.length/pageSize));
     $('[data-action="prev"]').disabled = page===0; $('[data-action="next"]').disabled = start+pageSize>=found.length;
     updateSelection(); paintIcons();
+    if (toolkitHost) toolkitHost.visible(rows);
 }
 function paintIcons() {
     if (!g.ImageManager || !g.ImageManager.loadSystem) return;
@@ -1320,7 +1338,10 @@ function renderDetail() {
     var html = '<span class="rt-id">' + esc(labels[kind]) + ' · #' + esc(r.id) + '</span><h3>' + esc(runtime.title(r)) + '</h3><p class="rt-muted rt-small">Nom d’origine : ' + esc(r.original || '(sans nom)') + '</p>';
     if (r.data && r.data.description) html += '<p class="rt-small" data-game-text>' + esc(r.data.description) + '</p>';
     html += '<div class="rt-divider"></div>';
-    if (kind === 'variables') {
+    if (toolkitHost) {
+        html += runtime.editable(r) ? valueForm(v, 'variable') : '<p class="rt-muted">…</p>';
+        html += button('Profil', 'wolf-profile');
+    } else if (kind === 'variables') {
         if (runtime.editable(r)) html += valueForm(v, 'variable');
         else html += '<p>Type complexe, en lecture seule.</p><pre>' + esc(runtime.printable(v)) + '</pre>';
     } else if (kind === 'switches' || kind === 'selfSwitches') {
@@ -1334,6 +1355,9 @@ function renderDetail() {
     else if (kind === 'skills' || kind === 'states') html += actorTarget() + '<div class="rt-actions">' + button(kind === 'skills' ? 'Apprendre' : 'Ajouter l’état', kind === 'skills' ? 'learn' : 'add-state', 'rt-primary') + button(kind === 'skills' ? 'Oublier' : 'Retirer l’état', kind === 'skills' ? 'forget' : 'remove-state') + '</div>';
     html += '<div class="rt-divider"></div><form data-form="alias">' + field('Nom anglais · affichage uniquement', 'rt-alias', runtime.alias(r), 'text', 'maxlength="2000" placeholder="Saisir une traduction…"') + '<div class="rt-actions"><button type="submit">Enregistrer le nom</button>' + button('Traduire en ligne', 'translate-one') + '</div></form>';
     detail.innerHTML = html;
+    if (toolkitHost && $('#rt-value-type')) {
+        Array.prototype.forEach.call($('#rt-value-type').options,function(option){option.disabled=r.data.string ? option.value!=='string' : option.value==='string';});
+    }
     updateValueInput(); renderActorContext();
 }
 
@@ -1428,6 +1452,7 @@ function startTranslation() {
     renderTranslations();
 }
 function download(name, data) {
+    if (toolkitHost) { toolkitHost.exportJson(name,data);return; }
     var url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' }));
     var link = document.createElement('a'); link.href = url; link.download = name; document.body.appendChild(link); link.click(); link.remove();
     setTimeout(function() { URL.revokeObjectURL(url); }, 30000);
@@ -1459,7 +1484,7 @@ function act(action, node) {
         if (action === 'freeze') { runtime.freezeMany([r],!runtime.isFrozen(r)); renderList(); say(runtime.isFrozen(r) ? 'Valeur figée pendant cette session.' : 'Valeur libérée.'); return; }
         var v = runtime.value(r), next;
         if (action === 'toggle-bool') next = !v;
-        else { next = v + (action === 'minus99' ? -99 : 99); if (/^(items|weapons|armors)$/.test(r.kind)) next = Math.max(0,Math.min(g.$gameParty.maxItems(r.data),next)); }
+        else { next = v + (action === 'minus99' ? -99 : 99); if (/^(items|weapons|armors)$/.test(r.kind)) next = Math.max(0,Math.min(toolkitHost ? 2000000000 : g.$gameParty.maxItems(r.data),next)); }
         runtime.setValue(r,next); changed('Valeur : ' + String(runtime.value(r))); return;
     }
     if (action === 'close') { closeToolkit(); return; }
@@ -1479,6 +1504,7 @@ function act(action, node) {
         var entries = []; runtime.kinds.forEach(function(k) { runtime.list(k).forEach(function(x) { if (x.original) entries.push({ key: x.key, original: x.original, english: runtime.alias(x) }); }); });
         download('RPGMToolkit-names-' + runtime.project + '.json', { format: 'rpgm-toolkit-translations-v1', project: runtime.project, entries: entries }); say('Exporté.'); return;
     }
+    if (toolkitHost && toolkitHost.action(action, node)) return;
     if (action === 'save-menu') {
         if (g.$gameParty.inBattle() || g.$gameMap.isEventRunning() || g.$gameMessage.isBusy() || !g.$gameSystem.isSaveEnabled()) throw new Error('La sauvegarde est indisponible pendant cet événement ou désactivée par le jeu.');
         closeToolkit(); g.SceneManager.push(g.Scene_Save); return;
@@ -1522,10 +1548,10 @@ function openToolkit() {
     if (!allowed()) return false;
     try {
         initializeRuntime();
-        if (!gameTools) gameTools = createToolkitTools(g, runtime);
-        runtime.refresh(); selected = null; checked = {}; 
-        buildRoot(); previousFocus = document.activeElement; openScene = g.SceneManager._scene;
-        openVariables = g.$gameVariables; opened = true; root.hidden = false; if (launch) launch.hidden = true;
+        if (!gameTools) gameTools = toolkitHost ? toolkitHost.tools(runtime) : createToolkitTools(g, runtime);
+        runtime.refresh(); selected = null; checked = {};
+        buildRoot(); previousFocus = document.activeElement; openScene = g.SceneManager && g.SceneManager._scene;
+        openVariables = toolkitHost ? toolkitHost.session : g.$gameVariables; opened = true; root.hidden = false; if (launch) launch.hidden = true;
         clearInput(); applySettings(); render(); showToolboxHome();
         say(runtime.storageWarning() ? 'Stockage local indisponible : exportez vos traductions pour les conserver.' : '');
         syncViewport(); $('.rt-panel').focus(); return true;
@@ -1541,11 +1567,12 @@ function refreshSceneWindows() {
 function closeToolkit() {
     if (!opened) return;
     opened = false; closeModal(); clearTimeout(searchTimer); root.hidden = true;
+    if (toolkitHost) toolkitHost.close();
     clearInput(); refreshSceneWindows();
     if (previousFocus && document.contains(previousFocus)) previousFocus.focus();
 }
 function toggleToolkit() { return opened ? closeToolkit() : openToolkit(); }
-g.RPGMToolkit = { version: '1.8.1', open: openToolkit, close: closeToolkit, toggle: toggleToolkit, isOpen: function() { return opened; } };
+g.RPGMToolkit = { version: '1.9.0', open: openToolkit, close: closeToolkit, toggle: toggleToolkit, isOpen: function() { return opened; } };
 var heldCloseKey = null;
 g.addEventListener('keydown', function(event) {
     var key = event.key || ({ 117: 'F6', 118: 'F7', 121: 'F10', 27: 'Escape' }[event.keyCode]);
@@ -1571,6 +1598,7 @@ g.addEventListener('keyup', function(event) {
 }, true);
 g.addEventListener('focus', function() { if (opened) clearInput(); });
 function mountLauncher(force) {
+    if (toolkitHost) return;
     if ((force !== true && toolkitParams.ShowButton === 'false') || launch) return;
     buildRoot(); launch = document.createElement('button'); launch.className = 'rt-launch'; launch.type = 'button'; launch.textContent = 'Toolbox · ' + hotkey; launch.hidden = true;
     launch.setAttribute('aria-label', 'Ouvrir RPGM Toolkit (' + hotkey + ')');
@@ -1579,6 +1607,7 @@ function mountLauncher(force) {
     document.body.appendChild(launch);
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mountLauncher); else mountLauncher();
+if (g.SceneManager) {
 var originalUpdateScene = g.SceneManager.updateScene;
 g.SceneManager.updateScene = function() {
     if (!runtime && allowed()) initializeRuntime();
@@ -1589,8 +1618,12 @@ g.SceneManager.updateScene = function() {
     if (runtime) runtime.enforceFrozen();
     if (!opened) { var result = originalUpdateScene.apply(this, arguments); if (gameTools) gameTools.tick(); if (runtime) runtime.enforceFrozen(); return result; }
 };
+}
+if (toolkitHost) {
+    toolkitHost.attach({ open:openToolkit, refresh:function(){ if(opened){var list=$('.rt-list'), scroll=list?list.scrollTop:0;renderList();if(list)list.scrollTop=scroll; if(modalMode==='edit' && selected && !$('.rt-modal').contains(document.activeElement))renderDetail();} }, status:say, modal:openModal, content:function(html){$('.rt-modal-content').innerHTML=html;}, record:function(){return selected;}, edit:function(record){selected=record;openModal('edit','Édition');$('.rt-modal-content').innerHTML='<section class="rt-detail"></section>';renderDetail();}, runtime:function(){return runtime;}, history:function(){runtime.clearHistory();}, home:showToolboxHome, render:function(){runtime.refresh();renderNav();renderList();}, settings:renderSettings });
+}
 function openFromInterpreter() { if (openToolkit() && this && this.setWaitMode) this.setWaitMode('rpgmToolkit'); }
-if (g.PluginManager.registerCommand) { g.PluginManager.registerCommand('RPGMToolkit', 'Open', openFromInterpreter); g.PluginManager.registerCommand('RPGMToolkit', 'Close', closeToolkit); }
+if (g.PluginManager && g.PluginManager.registerCommand) { g.PluginManager.registerCommand('RPGMToolkit', 'Open', openFromInterpreter); g.PluginManager.registerCommand('RPGMToolkit', 'Close', closeToolkit); }
 if (g.Game_Interpreter) {
     var previousPluginCommand = g.Game_Interpreter.prototype.pluginCommand;
     var previousUpdateWaitMode = g.Game_Interpreter.prototype.updateWaitMode;
@@ -1616,6 +1649,7 @@ function installToolboxUI() {
     var home = document.createElement('section'); home.className = 'rt-home';
     home.innerHTML = '<header class="rt-home-header">' + button('✕','tool-close','rt-close') + '<h1>Toolbox</h1><span class="rt-muted">Jeu en pause</span></header><nav class="rt-home-content" aria-label="Modes Toolbox"></nav>';
     $('.rt-panel').insertBefore(home, $('.rt-header'));
+    if (toolkitHost) home.querySelector('.rt-muted').textContent = 'WOLF RPG · Winlator';
     home.querySelector('[data-action="tool-close"]').setAttribute('aria-label','Fermer le Toolkit');
     var line = $('.rt-search-line'); line.insertBefore($('[data-action="close"]'),line.firstChild);
     var back = document.createElement('button'); back.type = 'button'; back.textContent = '‹'; back.dataset.action = 'tool-home'; back.setAttribute('aria-label','Retour à Toolbox');
@@ -1650,6 +1684,7 @@ function showToolboxHome() {
         ['history','Historique','Annuler ou rétablir une modification'],
         ['settings','Paramètres','Langue, affichage et raccourcis']
     ];
+    if (toolkitHost) entries = toolkitHost.modes(entries);
     $('.rt-home-content').innerHTML = entries.map(function(e) {
         var toggle = e[0] === 'god' || e[0] === 'noclip';
         return '<button type="button" data-action="tool-'+e[0]+'"'+(toggle ? ' role="switch" aria-checked="'+state[e[0]]+'" aria-label="'+e[1]+'"' : '')+'><strong>'+e[1]+'</strong><span>'+e[2]+'</span>'+(toggle ? '<b class="rt-toggle-track" aria-hidden="true"></b>' : '<b aria-hidden="true">›</b>')+'</button>';
@@ -1722,6 +1757,7 @@ function loadToolMap() {
 function toolboxAction(action, node) {
     if (action.indexOf('tool-') !== 0) return false;
     var mode = action.slice(5);
+    if (toolkitHost && toolkitHost.toolAction(mode, node)) return true;
     if (mode === 'close') closeToolkit();
     else if (mode === 'god' || mode === 'noclip') { if (mode === 'god') gameTools.setGod(!gameTools.state().god); else gameTools.setNoclip(!gameTools.state().noclip); node.setAttribute('aria-checked', String(gameTools.state()[mode])); }
     else if (mode === 'home') showToolboxHome();
@@ -1738,6 +1774,7 @@ function toolboxAction(action, node) {
     return true;
 }
 function toolboxSubmit(form) {
+    if (toolkitHost && toolkitHost.submit(form)) return true;
     if(form==='tool-save-place'){gameTools.travel.remember($('#rt-place-name').value);$('#rt-place-name').value='';renderPlaces();say('Emplacement enregistré.');return true;}
     if (form === 'tool-resources') { gameTools.resources($('#rt-tool-actor').value,$('#rt-tool-hp').value,$('#rt-tool-mp').value,$('#rt-tool-tp').value,false); dirty=true;updateToolValues();say('Ressources mises à jour.');return true; }
     if (form === 'tool-stats') { gameTools.stat($('#rt-tool-actor').value,$('#rt-tool-param').value,$('#rt-tool-value').value);dirty=true;updateToolValues();say('Statistique mise à jour.');return true; }

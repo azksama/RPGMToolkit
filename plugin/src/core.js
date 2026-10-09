@@ -1,7 +1,8 @@
 /* Runtime adapter. ES5 syntax for RPG Maker MV and MZ. */
 function createToolkitRuntime(g, storage) {
     'use strict';
-    var kinds = ['variables', 'switches', 'items', 'weapons', 'armors', 'actors', 'skills', 'states', 'selfSwitches'];
+    var host = g.ToolkitHost;
+    var kinds = host ? host.kinds : ['variables', 'switches', 'items', 'weapons', 'armors', 'actors', 'skills', 'states', 'selfSwitches'];
     var cache = {}, history = [], redo = [], log = [], baseline = {}, session = null;
     var prefs = { english: true, source: 'ja', favorites: {}, aliases: {}, settings: { language:'fr', fontSize:13, scrollbarWidth:24, pageSize:0, hotkey:'', showButton:true, safeTeleport:true, buttonX:0, buttonY:0, bottomClose:false, portrait:false, portraitPictures:true } };
     prefs.travel = { places:[], last:null };
@@ -16,7 +17,7 @@ function createToolkitRuntime(g, storage) {
         for (i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = (h + (h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24)) >>> 0; }
         return h.toString(16);
     }
-    var project = hash(String(g.location && g.location.pathname || '') + '|' + (g.$dataSystem && g.$dataSystem.gameTitle || ''));
+    var project = hash(host ? host.projectId : String(g.location && g.location.pathname || '') + '|' + (g.$dataSystem && g.$dataSystem.gameTitle || ''));
     var storageKey = 'rpgm-toolkit-v1:' + project;
     function savePrefs() {
         try { storage.setItem(storageKey, JSON.stringify(prefs)); storageWarning = false; }
@@ -42,7 +43,8 @@ function createToolkitRuntime(g, storage) {
         Object.keys(saved.aliases || {}).forEach(function(k) { if (/^[a-zA-Z]+:[0-9]+(?:\.[0-9]+\.[A-D])?$/.test(k) && validAlias(saved.aliases[k])) prefs.aliases[k] = saved.aliases[k]; });
     } catch (e) { storageWarning = true; }
     function ensureSession() {
-        if (session !== g.$gameVariables) { removeHooks(); frozen = {}; session = g.$gameVariables; history = []; redo = []; log = []; baseline = {}; cache = {}; }
+        var current = host ? host.session : g.$gameVariables;
+        if (session !== current) { removeHooks(); frozen = {}; session = current; history = []; redo = []; log = []; baseline = {}; cache = {}; }
     }
     function db(kind) {
         return { items: g.$dataItems, weapons: g.$dataWeapons, armors: g.$dataArmors, actors: g.$dataActors, skills: g.$dataSkills, states: g.$dataStates }[kind];
@@ -63,7 +65,9 @@ function createToolkitRuntime(g, storage) {
         }
         if (cache[kind]) return cache[kind];
         var result = [], source, i;
-        if (kind === 'variables' || kind === 'switches') {
+        if (host) {
+            (host.entries[kind] || []).forEach(function(entry) { result.push(makeRecord(kind, entry.reference, entry.name, entry)); });
+        } else if (kind === 'variables' || kind === 'switches') {
             source = g.$dataSystem[kind] || [];
             for (i = 1; i < source.length; i++) result.push(makeRecord(kind, i, source[i]));
         } else if (kind === 'selfSwitches') {
@@ -84,6 +88,7 @@ function createToolkitRuntime(g, storage) {
     function alias(r) { var a = prefs.aliases[r.key]; return a && a.original === r.original ? a.english : ''; }
     function title(r) { return (prefs.english && alias(r)) || r.original || '(sans nom)'; }
     function value(r) {
+        if (host) return host.value(r);
         if (r.kind === 'variables') { var raw = g.$gameVariables._data && g.$gameVariables._data[r.id]; return typeof raw === 'boolean' ? raw : g.$gameVariables.value(r.id); }
         if (r.kind === 'switches') return g.$gameSwitches.value(r.id);
         if (r.kind === 'selfSwitches') return g.$gameSelfSwitches.value(r.data);
@@ -98,17 +103,17 @@ function createToolkitRuntime(g, storage) {
     }
     function capture() {
         baseline = {};
-        ['variables', 'switches', 'selfSwitches'].forEach(function(kind) { list(kind).forEach(function(r) { baseline[r.key] = printable(value(r)); }); });
+        (host ? kinds : ['variables', 'switches', 'selfSwitches']).forEach(function(kind) { list(kind).forEach(function(r) { if (!host || host.known(r)) baseline[r.key] = printable(value(r)); }); });
         return Object.keys(baseline).length;
     }
     function changed(r) { return own(baseline, r.key) && baseline[r.key] !== printable(value(r)); }
     function search(kind, query, filter) {
         var tokens = normal(query).trim().split(/\s+/).filter(Boolean);
         return list(kind).filter(function(r) {
-            if (filter === 'int' && (typeof value(r) !== 'number' || !isFinite(value(r)) || Math.floor(value(r)) !== value(r))) return false;
+            if (filter === 'int' && (host ? r.data.string : (typeof value(r) !== 'number' || !isFinite(value(r)) || Math.floor(value(r)) !== value(r)))) return false;
             if (filter === 'bool' && typeof value(r) !== 'boolean') return false;
-            if (filter === 'text' && typeof value(r) !== 'string') return false;
-            if (filter === 'frozen' && !frozen[r.key]) return false;
+            if (filter === 'text' && (host ? !r.data.string : typeof value(r) !== 'string')) return false;
+            if (filter === 'frozen' && !(host ? host.frozen(r) : frozen[r.key])) return false;
             if (filter === 'favorites' && !prefs.favorites[r.key]) return false;
             if (filter === 'named' && !r.original.trim()) return false;
             if (filter === 'active' && !value(r)) return false;
@@ -150,9 +155,10 @@ function createToolkitRuntime(g, storage) {
     function assertRecord(r) {
         if (!r || list(r.kind).indexOf(r) < 0) throw new Error('Entrée périmée. Actualisez la liste.');
     }
-    function editable(r) { return /^(variables|switches|selfSwitches|items|weapons|armors)$/.test(r.kind) && /^(number|string|boolean)$/.test(typeof value(r)); }
+    function editable(r) { return host ? host.editable(r) : /^(variables|switches|selfSwitches|items|weapons|armors)$/.test(r.kind) && /^(number|string|boolean)$/.test(typeof value(r)); }
     function validateValue(r, next) {
         assertRecord(r);
+        if (host) return host.validate(r, next);
         if (!editable(r)) throw new Error('Cette entrée est en consultation : utilisez ses commandes spécifiques.');
         if (r.kind === 'variables') {
             if (typeof next === 'number') return integer(next, -9007199254740991, 9007199254740991);
@@ -169,7 +175,8 @@ function createToolkitRuntime(g, storage) {
     function writeValue(r, next) {
         var previous = writing; writing = true;
         try {
-            if (r.kind === 'variables') g.$gameVariables.setValue(r.id, next);
+            if (host) host.write(r, next);
+            else if (r.kind === 'variables') g.$gameVariables.setValue(r.id, next);
             else if (r.kind === 'switches') g.$gameSwitches.setValue(r.id, next);
             else if (r.kind === 'selfSwitches') g.$gameSelfSwitches.setValue(r.data, next);
             else g.$gameParty.gainItem(r.data, next - value(r), false);
@@ -231,14 +238,16 @@ function createToolkitRuntime(g, storage) {
     function freezeMany(records, active) {
         records = uniqueRecords(records);
         if (active) records.forEach(function(r) { validateValue(r, value(r)); });
-        var added = records.filter(function(r) { return !frozen[r.key]; }).length;
-        if (active && Object.keys(frozen).length + added > 500) throw new Error('Maximum : 500 valeurs figées simultanément.');
+        var added = records.filter(function(r) { return !(host ? host.frozen(r) : frozen[r.key]); }).length;
+        if (active && (host ? host.frozenCount() : Object.keys(frozen).length) + added > 500) throw new Error('Maximum : 500 valeurs figées simultanément.');
         records.forEach(function(r) { if (active) frozen[r.key] = { record:r, value:value(r) }; else delete frozen[r.key]; });
-        if (Object.keys(frozen).length) installHooks(); else removeHooks();
+        if (host) host.freeze(records, active);
+        else if (Object.keys(frozen).length) installHooks(); else removeHooks();
         return records.length;
     }
     function enforceFrozen() {
         ensureSession();
+        if (host) return;
         Object.keys(frozen).forEach(function(key) {
             var lock = frozen[key];
             if (value(lock.record) !== lock.value) {
@@ -340,12 +349,14 @@ function createToolkitRuntime(g, storage) {
     return {
         kinds: kinds, prefs: prefs, project: project, list: list, db: db, value: value, title: title, alias: alias,
         editable: editable, setMany: setMany, freezeMany: freezeMany, enforceFrozen: enforceFrozen,
-        isFrozen: function(r) { ensureSession(); return !!frozen[r.key]; }, frozenCount: function() { ensureSession(); return Object.keys(frozen).length; },
+        isFrozen: function(r) { ensureSession(); return host ? host.frozen(r) : !!frozen[r.key]; }, frozenCount: function() { ensureSession(); return host ? host.frozenCount() : Object.keys(frozen).length; },
         search: search, printable: printable, integer: integer, setValue: setValue, gold: gold, actor: actor, actorAction: actorAction, equip: equip,
         undo: function() { undoAction(false); }, redo: function() { undoAction(true); },
         canUndo: function() { ensureSession(); return history.length > 0; }, canRedo: function() { ensureSession(); return redo.length > 0; },
         log: function() { ensureSession(); return log; }, capture: capture, changed: changed,
         refresh: function() { ensureSession(); cache = {}; }, savePrefs: savePrefs, storageWarning: function() { return storageWarning; },
+        clearHistory: function() { history = []; redo = []; },
+        acceptBaseline: function(records) { records.forEach(function(r) { if (!own(baseline,r.key)) baseline[r.key]=printable(value(r)); }); },
         setAlias: setAlias, setAliases: setAliases, clearAliases: clearAliases, importAliases: importAliases,
         exportAliases: function() {
             return { format: 'rpgm-toolkit-translations-v1', project: project, entries: Object.keys(prefs.aliases).map(function(k) { return { key: k, original: prefs.aliases[k].original, english: prefs.aliases[k].english }; }) };

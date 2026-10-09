@@ -1,5 +1,15 @@
 # Versions
 
+## 1.9.0 — WOLF / Winlator
+
+- Éditeur WOLF 2/3 flottant : recherche, édition, favoris, sélection multiple, gel et traductions persistantes.
+- Marges Android et clavier adaptés au menu flottant ; les lectures sans réponse ne bloquent pas le défilement.
+- Profils configurables pour objets, armes, armures, HP alliés/ennemis, MP, stats et argent ; Godmode et No Clip.
+- Sauvegardes natives Toolkit et chargement confirmé, avec annulation si un événement bloque le chargement.
+- Installation, mise à jour, désinstallation et récupération en dossier partagé ou ZIP ; conservation des fichiers et sauvegardes d’origine.
+- Détection des dossiers RPG Maker sans `www`, des sous-dossiers `Data/` et des variations de casse.
+- Formats WOLF non protégés uniquement ; téléportation sûre et résolution portrait du jeu conservées sur RPG Maker.
+
 ## 1.8.1
 
 

@@ -1,4 +1,5 @@
 /* DOM overlay; no engine assets, dependencies or timers while closed. */
+var toolkitHost = g.ToolkitHost;
 var toolkitParams = g.PluginManager && g.PluginManager.parameters('RPGMToolkit') || {};
 var hotkey = /^(F6|F7|F10)$/.test(toolkitParams.Hotkey || '') ? toolkitParams.Hotkey : 'F6';
 var pageSize = Math.max(20, Math.min(80, Number(toolkitParams.PageSize) || 60));
@@ -6,7 +7,7 @@ var portraitMode, gameTools, runtime, translator, root, launch, previousFocus, o
 var opened = false, dirty = false, tab = 'variables', query = '', filter = 'all', page = 0, selected = null, found = [];
 var chosenActor = '', checked = {}, modalMode = '', modalFocus = null, exactValue = '';
 function picked() { return Object.keys(checked).map(function(k) { return checked[k]; }); }
-var labels = { favorites: 'Favoris', variables: 'Variables', switches: 'Interrupteurs', selfSwitches: 'Interr. locaux', items: 'Objets', weapons: 'Armes', armors: 'Armures', actors: 'Acteurs', skills: 'Compétences', states: 'États', party: 'Partie', translations: 'Traductions', history: 'Historique' };
+var labels = { favorites: 'Favoris', variables: 'Variables', switches: 'Interrupteurs', selfSwitches: 'Interr. locaux', items: 'Objets', weapons: 'Armes', armors: 'Armures', actors: 'Acteurs', skills: 'Compétences', states: 'États', strings: 'Textes', database: 'Base variable', resources: 'HP / MP', stats: 'Stats', party: 'Partie', translations: 'Traductions', history: 'Historique' };
 function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function(c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 function $(selector) { return root.querySelector(selector); }
 function button(text, action, cls) { return '<button type="button" data-action="' + action + '" class="' + (cls || '') + '">' + text + '</button>'; }
@@ -16,6 +17,7 @@ function say(message, error) { if (root) { if (modalMode) { $('.rt-modal-status'
 function guarded(fn) { try { return fn(); } catch (e) { say(e.message || String(e), true); return undefined; } }
 function clearInput() { if (g.Input) g.Input.clear(); if (g.TouchInput) g.TouchInput.clear(); if (g.$gameTemp && g.$gameTemp.clearDestination) g.$gameTemp.clearDestination(); }
 function allowed() {
+    if (toolkitHost) return toolkitHost.isConnected();
     var manager = g.SceneManager, scene = manager && manager._scene;
     if (!(g.$dataSystem && g.$gameVariables && g.$gameParty && scene && ((g.Scene_Map && scene instanceof g.Scene_Map) || (g.Scene_Battle && scene instanceof g.Scene_Battle)))) return false;
     if (manager.isSceneChanging()) return false;
@@ -102,7 +104,7 @@ function buildRoot() {
     });
 }
 function renderNav() {
-    $('#rt-category').innerHTML = Object.keys(labels).filter(function(k) { return k !== 'translations'; }).map(function(k) { return '<option value="' + k + '">' + esc(labels[k]) + '</option>'; }).join('');
+    $('#rt-category').innerHTML = (toolkitHost ? ['favorites'].concat(runtime.kinds) : Object.keys(labels).filter(function(k) { return k !== 'translations'; })).map(function(k) { return '<option value="' + k + '">' + esc(labels[k]) + '</option>'; }).join('');
     $('#rt-category').value = tab;
 }
 function render() {
@@ -135,6 +137,7 @@ function lockIcon(locked) {
     return '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="1.5"/>' + (locked ? '<path d="M5 7V5a3 3 0 016 0v2"/>' : '<path d="M5 7V5a3 3 0 015-2"/>') + '<path d="M8 10v2"/></svg>';
 }
 function rowValue(r) {
+    if (toolkitHost && !toolkitHost.known(r)) return '…';
     var v = runtime.printable(runtime.value(r));
     if (r.kind === 'actors') return 'Niv. ' + v;
     if (r.kind === 'skills') return v + ' MP';
@@ -151,13 +154,14 @@ function renderList() {
         var index = start+i, v = runtime.value(r), edit = runtime.editable(r), frozen = runtime.isFrozen(r), name = runtime.title(r), quick = '';
         if (edit && typeof v === 'number') quick = rowAction('−99','minus99',index,'Retirer 99 : '+name) + rowAction('+99','plus99',index,'Ajouter 99 : '+name);
         else if (edit && typeof v === 'boolean') quick = rowAction(v ? 'false' : 'true','toggle-bool',index,'Basculer : '+name);
-        return '<li class="rt-row' + (frozen ? ' rt-frozen' : '') + '"><label class="rt-row-check"><input type="checkbox" data-check-index="' + index + '" aria-label="Sélectionner : ' + esc(name) + '"' + (checked[r.key] ? ' checked' : '') + '></label><button type="button" class="rt-select" data-action="select" data-index="' + index + '" title="' + esc(name+' · #'+r.id) + '">' + (r.data && typeof r.data.iconIndex === 'number' ? '<canvas class="rt-icon" width="32" height="32" data-icon="' + r.data.iconIndex + '" aria-hidden="true"></canvas>' : '') + '<span class="rt-row-id">#' + esc(r.id) + '</span><span class="rt-row-title">' + esc(name) + '</span></button><span class="rt-row-value" title="' + esc(String(v)) + '">' + esc(typeof v === 'boolean' ? String(v) : rowValue(r)) + '</span><div class="rt-row-actions">' + quick + rowAction(runtime.prefs.favorites[r.key] ? '★' : '☆','star',index,'Favori : '+name,!!runtime.prefs.favorites[r.key]) + rowAction(lockIcon(frozen),'freeze',index,(frozen?'Libérer : ':'Figer : ')+name,frozen,!edit) + rowAction('✎','select',index,'Éditer : '+name) + '</div></li>';
+        return '<li class="rt-row' + (frozen ? ' rt-frozen' : '') + '"><label class="rt-row-check"><input type="checkbox" data-check-index="' + index + '" aria-label="Sélectionner : ' + esc(name) + '"' + (checked[r.key] ? ' checked' : '') + '></label><button type="button" class="rt-select" data-action="select" data-index="' + index + '" title="' + esc(name+' · #'+r.id) + '">' + (toolkitHost && toolkitHost.icon(r) ? '<img class="rt-icon" width="24" height="24" src="'+esc(toolkitHost.icon(r))+'" alt="">' : r.data && typeof r.data.iconIndex === 'number' ? '<canvas class="rt-icon" width="32" height="32" data-icon="' + r.data.iconIndex + '" aria-hidden="true"></canvas>' : '') + '<span class="rt-row-id">#' + esc(r.id) + '</span><span class="rt-row-title">' + esc(name) + '</span></button><span class="rt-row-value" title="' + esc(String(v)) + '">' + esc(typeof v === 'boolean' ? String(v) : rowValue(r)) + '</span><div class="rt-row-actions">' + quick + rowAction(runtime.prefs.favorites[r.key] ? '★' : '☆','star',index,'Favori : '+name,!!runtime.prefs.favorites[r.key]) + rowAction(lockIcon(frozen),'freeze',index,(frozen?'Libérer : ':'Figer : ')+name,frozen,!edit) + rowAction('✎','select',index,'Éditer : '+name) + '</div></li>';
     }).join('') : '<li class="rt-empty">Aucun résultat. Changez la recherche ou le filtre.</li>';
     $('#rt-count').textContent = found.length ? (start+1)+'–'+(start+rows.length)+' / '+found.length.toLocaleString() : '0 résultat';
     $('#rt-page-number').value = page+1; $('#rt-page-number').max = Math.max(1,Math.ceil(found.length/pageSize));
     $('#rt-page-total').textContent = '/ '+Math.max(1,Math.ceil(found.length/pageSize));
     $('[data-action="prev"]').disabled = page===0; $('[data-action="next"]').disabled = start+pageSize>=found.length;
     updateSelection(); paintIcons();
+    if (toolkitHost) toolkitHost.visible(rows);
 }
 function paintIcons() {
     if (!g.ImageManager || !g.ImageManager.loadSystem) return;
@@ -183,7 +187,10 @@ function renderDetail() {
     var html = '<span class="rt-id">' + esc(labels[kind]) + ' · #' + esc(r.id) + '</span><h3>' + esc(runtime.title(r)) + '</h3><p class="rt-muted rt-small">Nom d’origine : ' + esc(r.original || '(sans nom)') + '</p>';
     if (r.data && r.data.description) html += '<p class="rt-small" data-game-text>' + esc(r.data.description) + '</p>';
     html += '<div class="rt-divider"></div>';
-    if (kind === 'variables') {
+    if (toolkitHost) {
+        html += runtime.editable(r) ? valueForm(v, 'variable') : '<p class="rt-muted">…</p>';
+        html += button('Profil', 'wolf-profile');
+    } else if (kind === 'variables') {
         if (runtime.editable(r)) html += valueForm(v, 'variable');
         else html += '<p>Type complexe, en lecture seule.</p><pre>' + esc(runtime.printable(v)) + '</pre>';
     } else if (kind === 'switches' || kind === 'selfSwitches') {
@@ -197,6 +204,9 @@ function renderDetail() {
     else if (kind === 'skills' || kind === 'states') html += actorTarget() + '<div class="rt-actions">' + button(kind === 'skills' ? 'Apprendre' : 'Ajouter l’état', kind === 'skills' ? 'learn' : 'add-state', 'rt-primary') + button(kind === 'skills' ? 'Oublier' : 'Retirer l’état', kind === 'skills' ? 'forget' : 'remove-state') + '</div>';
     html += '<div class="rt-divider"></div><form data-form="alias">' + field('Nom anglais · affichage uniquement', 'rt-alias', runtime.alias(r), 'text', 'maxlength="2000" placeholder="Saisir une traduction…"') + '<div class="rt-actions"><button type="submit">Enregistrer le nom</button>' + button('Traduire en ligne', 'translate-one') + '</div></form>';
     detail.innerHTML = html;
+    if (toolkitHost && $('#rt-value-type')) {
+        Array.prototype.forEach.call($('#rt-value-type').options,function(option){option.disabled=r.data.string ? option.value!=='string' : option.value==='string';});
+    }
     updateValueInput(); renderActorContext();
 }
 
@@ -291,6 +301,7 @@ function startTranslation() {
     renderTranslations();
 }
 function download(name, data) {
+    if (toolkitHost) { toolkitHost.exportJson(name,data);return; }
     var url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' }));
     var link = document.createElement('a'); link.href = url; link.download = name; document.body.appendChild(link); link.click(); link.remove();
     setTimeout(function() { URL.revokeObjectURL(url); }, 30000);
@@ -322,7 +333,7 @@ function act(action, node) {
         if (action === 'freeze') { runtime.freezeMany([r],!runtime.isFrozen(r)); renderList(); say(runtime.isFrozen(r) ? 'Valeur figée pendant cette session.' : 'Valeur libérée.'); return; }
         var v = runtime.value(r), next;
         if (action === 'toggle-bool') next = !v;
-        else { next = v + (action === 'minus99' ? -99 : 99); if (/^(items|weapons|armors)$/.test(r.kind)) next = Math.max(0,Math.min(g.$gameParty.maxItems(r.data),next)); }
+        else { next = v + (action === 'minus99' ? -99 : 99); if (/^(items|weapons|armors)$/.test(r.kind)) next = Math.max(0,Math.min(toolkitHost ? 2000000000 : g.$gameParty.maxItems(r.data),next)); }
         runtime.setValue(r,next); changed('Valeur : ' + String(runtime.value(r))); return;
     }
     if (action === 'close') { closeToolkit(); return; }
@@ -342,6 +353,7 @@ function act(action, node) {
         var entries = []; runtime.kinds.forEach(function(k) { runtime.list(k).forEach(function(x) { if (x.original) entries.push({ key: x.key, original: x.original, english: runtime.alias(x) }); }); });
         download('RPGMToolkit-names-' + runtime.project + '.json', { format: 'rpgm-toolkit-translations-v1', project: runtime.project, entries: entries }); say('Exporté.'); return;
     }
+    if (toolkitHost && toolkitHost.action(action, node)) return;
     if (action === 'save-menu') {
         if (g.$gameParty.inBattle() || g.$gameMap.isEventRunning() || g.$gameMessage.isBusy() || !g.$gameSystem.isSaveEnabled()) throw new Error('La sauvegarde est indisponible pendant cet événement ou désactivée par le jeu.');
         closeToolkit(); g.SceneManager.push(g.Scene_Save); return;
@@ -385,10 +397,10 @@ function openToolkit() {
     if (!allowed()) return false;
     try {
         initializeRuntime();
-        if (!gameTools) gameTools = createToolkitTools(g, runtime);
-        runtime.refresh(); selected = null; checked = {}; 
-        buildRoot(); previousFocus = document.activeElement; openScene = g.SceneManager._scene;
-        openVariables = g.$gameVariables; opened = true; root.hidden = false; if (launch) launch.hidden = true;
+        if (!gameTools) gameTools = toolkitHost ? toolkitHost.tools(runtime) : createToolkitTools(g, runtime);
+        runtime.refresh(); selected = null; checked = {};
+        buildRoot(); previousFocus = document.activeElement; openScene = g.SceneManager && g.SceneManager._scene;
+        openVariables = toolkitHost ? toolkitHost.session : g.$gameVariables; opened = true; root.hidden = false; if (launch) launch.hidden = true;
         clearInput(); applySettings(); render(); showToolboxHome();
         say(runtime.storageWarning() ? 'Stockage local indisponible : exportez vos traductions pour les conserver.' : '');
         syncViewport(); $('.rt-panel').focus(); return true;
@@ -404,11 +416,12 @@ function refreshSceneWindows() {
 function closeToolkit() {
     if (!opened) return;
     opened = false; closeModal(); clearTimeout(searchTimer); root.hidden = true;
+    if (toolkitHost) toolkitHost.close();
     clearInput(); refreshSceneWindows();
     if (previousFocus && document.contains(previousFocus)) previousFocus.focus();
 }
 function toggleToolkit() { return opened ? closeToolkit() : openToolkit(); }
-g.RPGMToolkit = { version: '1.8.1', open: openToolkit, close: closeToolkit, toggle: toggleToolkit, isOpen: function() { return opened; } };
+g.RPGMToolkit = { version: '1.9.0', open: openToolkit, close: closeToolkit, toggle: toggleToolkit, isOpen: function() { return opened; } };
 var heldCloseKey = null;
 g.addEventListener('keydown', function(event) {
     var key = event.key || ({ 117: 'F6', 118: 'F7', 121: 'F10', 27: 'Escape' }[event.keyCode]);
@@ -434,6 +447,7 @@ g.addEventListener('keyup', function(event) {
 }, true);
 g.addEventListener('focus', function() { if (opened) clearInput(); });
 function mountLauncher(force) {
+    if (toolkitHost) return;
     if ((force !== true && toolkitParams.ShowButton === 'false') || launch) return;
     buildRoot(); launch = document.createElement('button'); launch.className = 'rt-launch'; launch.type = 'button'; launch.textContent = 'Toolbox · ' + hotkey; launch.hidden = true;
     launch.setAttribute('aria-label', 'Ouvrir RPGM Toolkit (' + hotkey + ')');
@@ -442,6 +456,7 @@ function mountLauncher(force) {
     document.body.appendChild(launch);
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mountLauncher); else mountLauncher();
+if (g.SceneManager) {
 var originalUpdateScene = g.SceneManager.updateScene;
 g.SceneManager.updateScene = function() {
     if (!runtime && allowed()) initializeRuntime();
@@ -452,8 +467,12 @@ g.SceneManager.updateScene = function() {
     if (runtime) runtime.enforceFrozen();
     if (!opened) { var result = originalUpdateScene.apply(this, arguments); if (gameTools) gameTools.tick(); if (runtime) runtime.enforceFrozen(); return result; }
 };
+}
+if (toolkitHost) {
+    toolkitHost.attach({ open:openToolkit, refresh:function(){ if(opened){var list=$('.rt-list'), scroll=list?list.scrollTop:0;renderList();if(list)list.scrollTop=scroll; if(modalMode==='edit' && selected && !$('.rt-modal').contains(document.activeElement))renderDetail();} }, status:say, modal:openModal, content:function(html){$('.rt-modal-content').innerHTML=html;}, record:function(){return selected;}, edit:function(record){selected=record;openModal('edit','Édition');$('.rt-modal-content').innerHTML='<section class="rt-detail"></section>';renderDetail();}, runtime:function(){return runtime;}, history:function(){runtime.clearHistory();}, home:showToolboxHome, render:function(){runtime.refresh();renderNav();renderList();}, settings:renderSettings });
+}
 function openFromInterpreter() { if (openToolkit() && this && this.setWaitMode) this.setWaitMode('rpgmToolkit'); }
-if (g.PluginManager.registerCommand) { g.PluginManager.registerCommand('RPGMToolkit', 'Open', openFromInterpreter); g.PluginManager.registerCommand('RPGMToolkit', 'Close', closeToolkit); }
+if (g.PluginManager && g.PluginManager.registerCommand) { g.PluginManager.registerCommand('RPGMToolkit', 'Open', openFromInterpreter); g.PluginManager.registerCommand('RPGMToolkit', 'Close', closeToolkit); }
 if (g.Game_Interpreter) {
     var previousPluginCommand = g.Game_Interpreter.prototype.pluginCommand;
     var previousUpdateWaitMode = g.Game_Interpreter.prototype.updateWaitMode;

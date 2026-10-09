@@ -1,4 +1,6 @@
 var toolkitEnglish = {
+    'Sauvegardes Toolkit':'Toolkit saves','Charger la sauvegarde':'Load save','Sauvegarde chargée.':'Save loaded.',
+    'Base variable':'Mutable database','Textes':'Strings','Profil':'Profile','Actualisation':'Refresh interval','Rôle':'Role','Interrupteur':'Switch','Objet':'Item','Arme':'Weapon','Armure':'Armor','Argent':'Gold','Nom':'Name','Équipe':'Team','Alliés':'Allies','ID du maximum':'Maximum field ID','Icône':'Icon','HP figés suivant le profil':'Freeze HP using the profile','Champs associés au profil':'Profile fields','Sauvegarde Toolkit':'Toolkit save','Objets, ressources et stats du jeu':'Game items, resources and stats','Aucun champ associé.':'No mapped fields.','Lecture des HP en cours.':'Reading HP.','Attendez la lecture du jeu.':'Wait for game values.','WOLF ne répond pas.':'WOLF is not responding.','Profil enregistré.':'Profile saved.','Profil importé.':'Profile imported.','En cours…':'Working…','Appliqué.':'Applied.',
     'Portraits en bas':'Portraits at the bottom',
     'Portrait plein écran':'Full-screen portrait','Activez ce mode depuis la carte, hors événement.':'Enable this mode on the map, outside an event.','Mode portrait disponible sur MV/MZ.':'Portrait mode is available on MV/MZ.',
     'Nom de l’emplacement':'Location name','Enregistrer l’emplacement actuel':'Save current location','Dernier emplacement':'Last location','Emplacement enregistré.':'Location saved.',
@@ -96,6 +98,7 @@ function applySettings() {
     if(launch){launch.setAttribute('aria-label',(settings.language==='en'?'Open Toolbox':'Ouvrir Toolbox')+' ('+hotkey+')');launch.textContent='Toolbox · '+hotkey;launch.hidden=opened||!settings.showButton||!allowed();}
     root.classList.toggle('rt-close-recall',settings.bottomClose);
     positionLauncher(); var recall=$('.rt-bottom-close'); if(recall)recall.hidden=!settings.bottomClose;
+    if (toolkitHost) toolkitHost.settings(settings);
     localizeToolkit();fitToolboxModal();if(typeof refreshToolkitScroll==='function')refreshToolkitScroll();
 }
 function installSettings() {

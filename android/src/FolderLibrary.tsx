@@ -6,7 +6,7 @@ const plans = {install:'À installer',update:'À mettre à jour',repair:'À rép
 const results:Record<string,string> = {installed:'Installé',updated:'Mis à jour',removed:'Désinstallé',current:'Déjà à jour',absent:'Mod absent',failed:'Échec',restored:'Restauré'};
 const eligible = (game:FolderGame) => !['blocked','recover'].includes(game.plan);
 
-export function FolderLibrary({state,busy,run,onComplete}:{state:State;busy:boolean;run:Run;onComplete:(game:string,action:string)=>void}) {
+export function FolderLibrary({state,busy,run,onComplete,onOpenWolf}:{state:State;busy:boolean;run:Run;onOpenWolf:(token:string)=>void;onComplete:(game:string,action:string)=>void}) {
  const [selected,setSelected]=useState<Set<string>>(new Set()),[query,setQuery]=useState(''),[confirmation,setConfirmation]=useState<{tokens:string[];uninstall:boolean}|null>(null),[closed,setClosed]=useState(false),[summary,setSummary]=useState('');
  const known=useRef(new Set<string>()),dialog=useRef<HTMLDialogElement>(null);
  useEffect(()=>{
@@ -37,7 +37,7 @@ export function FolderLibrary({state,busy,run,onComplete}:{state:State;busy:bool
   <ul className="library-list" aria-label="Jeux trouvés">
    {shown.map(g=><li key={g.token} className={g.error?'library-error':''}>
     <label><input type="checkbox" checked={selected.has(g.token)} disabled={busy||!eligible(g)} onChange={()=>toggle(g.token)} aria-label={'Sélectionner '+g.title}/><span><strong>{g.title}</strong><small>{g.path}</small><span className="library-state">{g.game?.engine&&<b>{g.game.engine}</b>}{plans[g.plan]}{g.result&&<span> · {results[g.result]}</span>}</span>{g.error&&<small className="library-reason">{g.error}</small>}</span></label>
-    <div>{g.game?.recoveryNeeded&&<button disabled={busy} onClick={()=>run('recover_folder',{token:g.token})}>Restaurer</button>}<button aria-label={'Retirer '+g.title+' de la liste'} disabled={busy} onClick={()=>run('remove_folder',{token:g.token})}><X size={17}/></button></div>
+    <div>{g.game?.engine==='WOLF'&&g.plan==='current'&&<button disabled={busy} onClick={()=>onOpenWolf(g.token)}>Ouvrir l’éditeur</button>}{g.game?.recoveryNeeded&&<button disabled={busy} onClick={()=>run('recover_folder',{token:g.token})}>Restaurer</button>}<button aria-label={'Retirer '+g.title+' de la liste'} disabled={busy} onClick={()=>run('remove_folder',{token:g.token})}><X size={17}/></button></div>
    </li>)}
   </ul>
   {!shown.length&&<p className="library-empty">{query?'Aucun résultat.':'Aucun jeu détecté.'}</p>}

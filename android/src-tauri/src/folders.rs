@@ -28,12 +28,12 @@ impl FolderGame {
 
     pub fn set_snapshot(&mut self, mut snapshot: Snapshot) {
         self.mod_hash = snapshot.previous_mod.take().map(|code| engine::hash(code.as_bytes()));
-        if crate::rgss::legacy(&snapshot.info.engine) { snapshot.registry.clear(); }
+        if crate::rgss::legacy(&snapshot.info.engine) || crate::wolf::is_wolf(&snapshot.info.engine) { snapshot.registry.clear(); }
         self.snapshot = Some(snapshot);
     }
 
     pub fn plan(&self, code: &str) -> &'static str {
-        let code = if self.snapshot.as_ref().is_some_and(|s| crate::rgss::legacy(&s.info.engine)) { crate::rgss::CODE } else { code };
+        let code = if self.snapshot.as_ref().is_some_and(|s| crate::wolf::is_wolf(&s.info.engine)) { crate::wolf::CODE } else if self.snapshot.as_ref().is_some_and(|s| crate::rgss::legacy(&s.info.engine)) { crate::rgss::CODE } else { code };
         if self.error.is_some() { return "blocked"; }
         let Some(snapshot) = &self.snapshot else { return "blocked"; };
         if snapshot.info.recovery_needed { return "recover"; }
@@ -68,8 +68,8 @@ impl FolderGame {
                 self.result = if uninstall { "absent" } else { "current" }.into();
                 return Ok(());
             }
-            let code = if crate::rgss::legacy(&snapshot.info.engine) { crate::rgss::CODE } else { code };
-            let patched = if crate::rgss::legacy(&snapshot.info.engine) { crate::rgss::patch(&registry,uninstall)? } else { engine::patch_snapshot(snapshot, uninstall)? };
+            let code = if crate::wolf::is_wolf(&snapshot.info.engine) { crate::wolf::CODE } else if crate::rgss::legacy(&snapshot.info.engine) { crate::rgss::CODE } else { code };
+            let patched = if crate::wolf::is_wolf(&snapshot.info.engine) { crate::wolf::patch(&registry,uninstall)? } else if crate::rgss::legacy(&snapshot.info.engine) { crate::rgss::patch(&registry,uninstall)? } else { engine::patch_snapshot(snapshot, uninstall)? };
             let data = native("applyFolder", json!({"token":self.token,"registry":patched,"plugin":if uninstall {None}else{Some(code)},"expected":snapshot.info.fingerprint,"uninstall":uninstall}))?;
             let checked = folder_snapshot(&data)?;
             if checked.info.status != if uninstall { "absent" } else { "installed" } || (!uninstall && checked.previous_mod.as_deref() != Some(code)) {

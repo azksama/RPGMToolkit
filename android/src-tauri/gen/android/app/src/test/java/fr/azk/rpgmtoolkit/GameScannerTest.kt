@@ -48,4 +48,24 @@ class GameScannerTest {
         assertTrue(scanner(limit = 1).scan(root,root.name).warnings.isNotEmpty())
         assertTrue(scanner(depth = 0).scan(root,root.name).warnings.isNotEmpty())
     }
+    @Test fun rootLayoutsAndWindowsCasingAreDetected() {
+        val root = Node("Games")
+        val mv = root.dir("MV").apply { dir("JS").apply { file("RPG_CORE.JS"); file("Plugins.js") } }
+        val ace = root.dir("Ace").apply { file("GAME.INI"); dir("Data").file("Scripts.rvdata2") }
+        val assets = mv.dir("Data").apply { dir("Fake").game() }
+        val visited = mutableListOf<Node>()
+        val games = scanner(visited = visited).scan(root, root.name).games
+        assertEquals(setOf(mv, ace), games.map { it.node }.toSet())
+        assertFalse(visited.contains(assets))
+    }
+    @Test fun wolfLooseAndProtectedLayoutsAreFoundAtTheGameRoot() {
+        val root=Node("Collection")
+        val loose=root.dir("Loose").apply { file("Game.ini");dir("DATA").dir("BASICDATA").file("COMMONEVENT.DAT") }
+        val protected=root.dir("Protected").apply { file("Game.ini");file("Data.wolf") }
+        val basicArchive=root.dir("Basic").apply { dir("Data").file("BasicData.wolfx") }
+        val report=scanner().scan(root,root.name)
+        assertEquals(setOf(loose,protected,basicArchive),report.games.map {it.node}.toSet())
+        assertTrue(report.games.all {it.wolf && !it.legacy})
+        assertTrue(report.warnings.isEmpty())
+    }
 }

@@ -1,6 +1,7 @@
 mod engine;
 mod rgss;
 mod rgss_archive;
+mod wolf;
 mod folders;
 use engine::{Inspection, Snapshot};
 use serde_json::{json, Value};
@@ -13,7 +14,7 @@ struct Session {
     last_operation: String, last_error: Option<String>, code: String, mod_name: String, result: Option<PathBuf>, result_name: String, action: String,
 }
 impl Default for Session {
-    fn default()->Self { Self {folders:Vec::new(),folder_mode:false,scan_warnings:Vec::new(),last_operation:String::new(),last_error:None,snapshot:None,source:None,folder_token:String::new(),code:engine::EMBEDDED_MOD.into(),mod_name:"Toolkit 1.8.1 · inclus".into(),result:None,result_name:String::new(),action:String::new()} }
+    fn default()->Self { Self {folders:Vec::new(),folder_mode:false,scan_warnings:Vec::new(),last_operation:String::new(),last_error:None,snapshot:None,source:None,folder_token:String::new(),code:engine::EMBEDDED_MOD.into(),mod_name:"Toolkit 1.9.0 · inclus".into(),result:None,result_name:String::new(),action:String::new()} }
 }
 #[derive(Default)] struct AppState { session: Mutex<Session>, busy: AtomicBool }
 struct Busy<'a>(&'a AtomicBool);
@@ -30,6 +31,7 @@ fn view(s:&Session)->Value { json!({"folderMode":s.folder_mode,"games":s.folders
 fn folder_snapshot(v:&Value)->Result<Snapshot,String> {
     let info=Inspection {title:v["title"].as_str().unwrap_or("Jeu RPG Maker").into(),engine:v["engine"].as_str().ok_or("Moteur absent.")?.into(),prefix:String::new(),source_name:v["name"].as_str().unwrap_or("Dossier").into(),kind:"folder".into(),status:String::new(),plugin_count:0,files:0,size:0,fingerprint:String::new(),recovery_needed:v["recoveryNeeded"].as_bool().unwrap_or(false)};
     let registry = v["registry"].as_str().ok_or("Liste de plugins absente.")?;
+    if wolf::is_wolf(&info.engine) { return wolf::inspect(registry.into(),info); }
     if rgss::legacy(&info.engine) { return rgss::inspect(registry.into(),info); }
     engine::patch_registry(registry, false)?;
     engine::inspect_text(v["registry"].as_str().ok_or("Liste de plugins absente.")?.into(),v["plugin"].as_str().map(str::to_string),info)
@@ -130,7 +132,7 @@ async fn select_mod(app:AppHandle,request_id:String)->Result<Value,String>{job(a
     let code=engine::import_mod(&path);let _=std::fs::remove_file(path);s.code=code?;s.mod_name=data["name"].as_str().unwrap_or("ZIP du mod").into();clear_result(s);Ok(view(s))
 }).await}
 #[tauri::command]
-async fn reset_mod(app:AppHandle,request_id:String)->Result<Value,String>{job(app,request_id,|_,s|{s.code=engine::EMBEDDED_MOD.into();s.mod_name="Toolkit 1.8.1 · inclus".into();clear_result(s);Ok(view(s))}).await}
+async fn reset_mod(app:AppHandle,request_id:String)->Result<Value,String>{job(app,request_id,|_,s|{s.code=engine::EMBEDDED_MOD.into();s.mod_name="Toolkit 1.9.0 · inclus".into();clear_result(s);Ok(view(s))}).await}
 #[tauri::command]
 async fn apply_mod(app:AppHandle,uninstall:bool,request_id:String)->Result<Value,String>{job(app,request_id,move|app,s|{
     let snapshot=s.snapshot.clone().ok_or("Sélectionnez un jeu.")?;
@@ -166,11 +168,19 @@ async fn export_result(app:AppHandle,request_id:String)->Result<Value,String>{jo
 async fn recover_game(app:AppHandle,request_id:String)->Result<Value,String>{job(app,request_id,|app,s|{
     let data=native(app,"recoverFolder",json!({"token":s.folder_token}))?;s.snapshot=Some(folder_snapshot(&data)?);Ok(view(s))
 }).await}
+#[tauri::command]
+async fn open_wolf(app:AppHandle,token:String)->Result<Value,String>{
+    tauri::async_runtime::spawn_blocking(move||{
+        let checked=folder_snapshot(&native(&app,"inspectFolder",json!({"token":token}))?)?;
+        if !wolf::is_wolf(&checked.info.engine)||checked.info.status!="installed"||checked.info.recovery_needed||checked.previous_mod.as_deref()!=Some(wolf::CODE){return Err("Installez la version embarquée du mod WOLF avant d’ouvrir le menu.".into())}
+        native(&app,"openWolf",json!({"token":token}))
+    }).await.map_err(|e|e.to_string())?
+}
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder=tauri::Builder::default().manage(AppState::default());
     #[cfg(target_os="android")]
     let builder=builder.plugin(tauri::plugin::Builder::<tauri::Wry>::new("storage").setup(|app,api|{app.manage(Storage(api.register_android_plugin("fr.azk.rpgmtoolkit","StoragePlugin")?));Ok(())}).build());
-    builder.invoke_handler(tauri::generate_handler![get_state,select_game,select_mod,reset_mod,apply_mod,export_result,recover_game,scan_folders,refresh_folders,remove_folder,apply_folders,recover_folder])
+    builder.invoke_handler(tauri::generate_handler![get_state,select_game,select_mod,reset_mod,apply_mod,export_result,recover_game,scan_folders,refresh_folders,remove_folder,apply_folders,recover_folder,open_wolf])
         .run(tauri::generate_context!()).expect("Unable to start RPGM Toolkit");
 }

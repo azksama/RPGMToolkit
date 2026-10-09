@@ -70,7 +70,7 @@ pub fn patch_registry(registry: &str, uninstall: bool) -> Result<String, String>
     Ok(format!("{}{}{}", prefix, serde_json::to_string_pretty(&entries).map_err(|e|e.to_string())?, suffix))
 }
 pub fn patch_snapshot(snapshot:&Snapshot,uninstall:bool)->Result<String,String>{
-    if crate::rgss::legacy(&snapshot.info.engine) {crate::rgss::patch(&snapshot.registry,uninstall)} else {patch_registry(&snapshot.registry,uninstall)}
+    if crate::wolf::is_wolf(&snapshot.info.engine) {crate::wolf::patch(&snapshot.registry,uninstall)} else if crate::rgss::legacy(&snapshot.info.engine) {crate::rgss::patch(&snapshot.registry,uninstall)} else {patch_registry(&snapshot.registry,uninstall)}
 }
 fn valid_name(name: &str) -> bool {
     !name.is_empty() && !name.starts_with('/') && !name.contains(['\\', '\0', ':']) &&
@@ -105,11 +105,91 @@ fn zip_bytes(zip:&mut ZipArchive<File>,name:&str)->Result<Vec<u8>,String>{
     if file.size()>crate::rgss::LIMIT as u64{return Err(format!("{name} dépasse 16 Mo."))}
     let mut data=Vec::new();file.read_to_end(&mut data).map_err(|e|e.to_string())?;Ok(data)
 }
+fn actual<'a>(names: &'a HashSet<String>, name: &str) -> Option<&'a str> {
+    names.iter().find(|n| n.eq_ignore_ascii_case(name)).map(String::as_str)
+}
+fn wolf_bytes(zip: &mut ZipArchive<File>, names: &HashSet<String>, name: &str) -> Result<Option<Vec<u8>>, String> {
+    let Some(name)=actual(names,name) else { return Ok(None) };
+    let mut file=zip.by_name(name).map_err(|e|e.to_string())?;
+    if file.size()>wolf_toolkit::LIMIT as u64 { return Err(format!("{name} dépasse 64 Mo.")) }
+    let mut bytes=Vec::new();file.by_ref().take(wolf_toolkit::LIMIT as u64+1).read_to_end(&mut bytes).map_err(|e|e.to_string())?;
+    if bytes.len()>wolf_toolkit::LIMIT {return Err("Fichier WOLF trop grand.".into())}
+    Ok(Some(bytes))
+}
+fn inspect_wolf_zip(zip: &mut ZipArchive<File>, names: &HashSet<String>, prefix: &str, source: &str, path: &Path) -> Result<Snapshot,String> {
+    use wolf_toolkit::install::{Bundle,encode};
+    for name in ["Data.wolf","Data.wolfx","Data/BasicData.wolf","Data/BasicData.wolfx"] {
+        if actual(names,&format!("{prefix}{name}")).is_some() {return Err("WOLF : une archive Data/BasicData protégée est présente. Des fichiers décompressés sont requis.".into())}
+    }
+    if actual(names,&format!("{prefix}.rpgm-toolkit-wolf-pending.json")).is_some() {return Err("Restauration WOLF requise en mode Dossier.".into())}
+    let mut binary=|name: &str| wolf_bytes(zip,names,&format!("{prefix}{name}"));
+    let common=binary("Data/BasicData/CommonEvent.dat")?.ok_or("CommonEvent.dat absent.")?;
+    let system=binary("Data/BasicData/SysDatabase.dat")?.ok_or("SysDatabase.dat absent.")?;
+    let mutable=binary("Data/BasicData/CDataBase.dat")?.ok_or("CDataBase.dat absent.")?;
+    let original=binary("Data/RPGMToolkit/original-common.dat")?;
+    let game=binary("Data/BasicData/Game.dat")?.ok_or("Game.dat absent.")?;
+    let original_game=binary("Data/RPGMToolkit/original-game.dat")?;
+    let system_names=binary("Data/BasicData/SysDatabase.project")?;
+    let mutable_names=binary("Data/BasicData/CDataBase.project")?;
+    let marker=binary("Data/RPGMToolkit/meta.json")?.map(String::from_utf8).transpose().map_err(|_|"Manifeste WOLF invalide.")?;
+    let catalog=binary("Data/RPGMToolkit/catalog.json")?.map(String::from_utf8).transpose().map_err(|_|"Catalogue WOLF invalide.")?;
+    let own=format!("{prefix}Data/RPGMToolkit/").to_ascii_lowercase();
+    if marker.is_none() && names.iter().any(|n|n.to_ascii_lowercase().strip_prefix(&own).is_some_and(|leaf|!leaf.is_empty()&&!leaf.ends_with('/')&&!wolf_saved_file(leaf))) {
+        return Err("Dossier WOLF Toolkit déjà utilisé ou installation incomplète.".into())
+    }
+    let bundle=Bundle {common:encode(&common),original:original.as_deref().map(encode),system:encode(&system),system_names:system_names.as_deref().map(encode),mutable:encode(&mutable),mutable_names:mutable_names.as_deref().map(encode),marker,catalog,game:encode(&game),original_game:original_game.as_deref().map(encode)};
+    let title=prefix.trim_end_matches('/').rsplit('/').next().filter(|s|!s.is_empty()).unwrap_or(source).to_string();
+    let info=Inspection {title,engine:"WOLF".into(),prefix:prefix.into(),source_name:source.into(),kind:"zip".into(),status:String::new(),plugin_count:0,files:zip.len(),size:path.metadata().map_err(|e|e.to_string())?.len(),fingerprint:String::new(),recovery_needed:false};
+    crate::wolf::inspect(serde_json::to_string(&bundle).map_err(|e|e.to_string())?,info)
+}
+fn wolf_saved_file(name: &str) -> bool {
+    name.strip_prefix("toolkit-save-").and_then(|s|s.strip_suffix(".sav")).is_some_and(|n|!n.is_empty()&&n.len()<=6&&n.bytes().all(|b|b.is_ascii_digit()))
+}
+fn wolf_protocol_file(name: &str) -> bool {
+    ["commands.txt","request.txt","reply.txt","ack.txt"].contains(&name) || ["input-","output-"].iter().any(|p|name.strip_prefix(p).and_then(|s|s.strip_suffix(".txt")).is_some_and(|n|!n.is_empty()&&n.len()<=3&&n.bytes().all(|b|b.is_ascii_digit())))
+}
+fn transform_wolf_zip(input: &Path, output: &Path, snapshot: &Snapshot, uninstall: bool, progress: impl Fn(usize,usize)) -> Result<(),String> {
+    let result=(||{
+        let patched=crate::wolf::patch(&snapshot.registry,uninstall)?;
+        let wolf_toolkit::install::Files {common,original,catalog,marker,game,original_game}=wolf_toolkit::install::files(&patched)?;
+        let mut source=open_zip(input)?;let names=source.file_names().map(str::to_string).collect::<HashSet<_>>();
+        let prefix=&snapshot.info.prefix;
+        let common_path=actual(&names,&format!("{prefix}Data/BasicData/CommonEvent.dat")).ok_or("CommonEvent.dat absent.")?.to_string();
+        let game_path=actual(&names,&format!("{prefix}Data/BasicData/Game.dat")).ok_or("Game.dat absent.")?.to_string();
+        let data_path=&common_path[..common_path.to_ascii_lowercase().rfind("/basicdata/").ok_or("Dossier WOLF invalide.")?+1];
+        let own=actual(&names,&format!("{prefix}Data/RPGMToolkit/meta.json")).map(|n|n[..n.len()-9].to_string()).unwrap_or_else(||format!("{data_path}RPGMToolkit/"));
+        let owned=own.to_ascii_lowercase();let count=source.len();let mut writer=ZipWriter::new(File::create(output).map_err(|e|e.to_string())?);
+        for i in 0..count {
+            let file=source.by_index(i).map_err(|e|e.to_string())?;let name=file.name().to_ascii_lowercase();
+            let remove=name==common_path.to_ascii_lowercase() || name==game_path.to_ascii_lowercase() || name.strip_prefix(&owned).is_some_and(|leaf|["original-common.dat","original-game.dat","catalog.json","meta.json"].contains(&leaf)||uninstall&&wolf_protocol_file(leaf));
+            if !remove {writer.raw_copy_file(file).map_err(|e|e.to_string())?}
+            if i%50==0||i+1==count {progress(i+1,count)}
+        }
+        let options=SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated).unix_permissions(0o644);
+        let mut write=|name: String,bytes: &[u8]|->Result<(),String>{writer.start_file(name,options).map_err(|e|e.to_string())?;writer.write_all(bytes).map_err(|e|e.to_string())};
+        let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e|e.to_string())?.as_nanos();
+        write(format!("{prefix}.rpgm-toolkit-backups/{stamp}/wolf-state.json"),snapshot.registry.as_bytes())?;
+        write(common_path,&common)?;
+        write(game_path,&game)?;
+        if !uninstall {
+            write(format!("{own}original-common.dat"),&original.ok_or("Copie originale WOLF absente.")?)?;
+            write(format!("{own}original-game.dat"),&original_game.ok_or("Copie originale Game.dat absente.")?)?;
+            write(format!("{own}catalog.json"),catalog.ok_or("Catalogue WOLF absent.")?.as_bytes())?;
+            write(format!("{own}meta.json"),marker.ok_or("Manifeste WOLF absent.")?.as_bytes())?;
+            if actual(&names,&format!("{own}request.txt")).is_none() {write(format!("{own}request.txt"),b"0")?}
+        }
+        writer.finish().map_err(|e|e.to_string())?.sync_all().map_err(|e|e.to_string())?;
+        let verified=inspect_zip(output,&snapshot.info.source_name)?;
+        if verified.info.status!=if uninstall{"absent"}else{"installed"} || !uninstall&&verified.previous_mod.as_deref()!=Some(crate::wolf::CODE) {return Err("Vérification du ZIP WOLF échouée.".into())}
+        Ok(())
+    })();
+    if result.is_err(){let _=std::fs::remove_file(output);}result
+}
 fn inspect_rgss_zip(zip:&mut ZipArchive<File>,names:&HashSet<String>,prefix:&str,source:&str,path:&Path)->Result<Snapshot,String>{
     use crate::rgss;
-    let ini=zip_bytes(zip,&format!("{prefix}Game.ini"))?;
+    let ini=zip_bytes(zip,actual(names,&format!("{prefix}Game.ini")).ok_or("Game.ini absent.")?)?;
     let original_path=format!("{prefix}RPGMToolkit/original-game.ini");
-    let original=if names.contains(&original_path){zip_bytes(zip,&original_path)?}else{ini.clone()};
+    let original=if let Some(name)=actual(names,&original_path){zip_bytes(zip,name)?}else{ini.clone()};
     let (script_path,engine)=rgss::script_path(&ini)?;
     if rgss::script_path(&original)?.0.starts_with("RPGMToolkit/"){return Err("Copie originale de Game.ini absente.".into())}
     let ext=match engine.as_str(){"XP"=>".rgssad","VX"=>".rgss2a",_=>".rgss3a"};
@@ -123,7 +203,7 @@ fn inspect_rgss_zip(zip:&mut ZipArchive<File>,names:&HashSet<String>,prefix:&str
         let actual=names.iter().find(|n|n.eq_ignore_ascii_case(&full)).ok_or("Scripts RGSS absents.")?;
         zip_bytes(zip,actual)?
     };
-    if !names.contains(&original_path)&&names.iter().any(|n|n.starts_with(&format!("{prefix}RPGMToolkit/"))&&!n.ends_with('/')){return Err("Dossier RPGMToolkit déjà utilisé.".into())}
+    if actual(names,&original_path).is_none()&&names.iter().any(|n|n.to_ascii_lowercase().starts_with(&format!("{prefix}RPGMToolkit/").to_ascii_lowercase())&&!n.ends_with('/')){return Err("Dossier RPGMToolkit déjà utilisé.".into())}
     let title=String::from_utf8_lossy(&original).lines().find_map(|l|l.split_once('=').filter(|(k,_)|k.trim().eq_ignore_ascii_case("Title")).map(|(_,v)|v.trim().to_string())).unwrap_or_else(||source.into());
     let info=Inspection{title,engine,prefix:prefix.into(),source_name:source.into(),kind:"zip".into(),status:String::new(),plugin_count:0,files:zip.len(),size:path.metadata().map_err(|e|e.to_string())?.len(),fingerprint:String::new(),recovery_needed:false};
     rgss::inspect(rgss::bundle(&ini,&original,&scripts),info)
@@ -133,9 +213,13 @@ fn transform_rgss_zip(input:&Path,output:&Path,snapshot:&Snapshot,uninstall:bool
     let result=(||{
         let patched=rgss::patch(&snapshot.registry,uninstall)?;
         let (ini,original,scripts)=rgss::fields(&patched)?;
-        let prefix=&snapshot.info.prefix;let ini_path=format!("{prefix}Game.ini");
-        let script_path=format!("{prefix}{}",rgss::target(&original)?);let original_path=format!("{prefix}RPGMToolkit/original-game.ini");
-        let mut source=open_zip(input)?;let count=source.len();let mut writer=ZipWriter::new(File::create(output).map_err(|e|e.to_string())?);
+        let prefix=&snapshot.info.prefix;
+        let mut source=open_zip(input)?;let names=source.file_names().map(str::to_string).collect::<HashSet<_>>();
+        let ini_path=actual(&names,&format!("{prefix}Game.ini")).ok_or("Game.ini absent.")?.to_string();
+        let wanted=format!("{prefix}{}",rgss::target(&original)?);
+        let script_path=actual(&names,&wanted).unwrap_or(&wanted).to_string();
+        let wanted=format!("{prefix}RPGMToolkit/original-game.ini");let original_path=actual(&names,&wanted).unwrap_or(&wanted).to_string();
+        let count=source.len();let mut writer=ZipWriter::new(File::create(output).map_err(|e|e.to_string())?);
         for i in 0..count{let file=source.by_index(i).map_err(|e|e.to_string())?;
             if file.name()!=ini_path&&file.name()!=script_path&&file.name()!=original_path&&!(uninstall&&file.name()==format!("{prefix}RPGMToolkit/")){writer.raw_copy_file(file).map_err(|e|e.to_string())?;}
             if i%50==0||i+1==count{progress(i+1,count)}
@@ -157,26 +241,40 @@ pub fn inspect_zip(path: &Path, source_name: &str) -> Result<Snapshot, String> {
     eprintln!("RPGM: detecting ZIP game root");
     let names: HashSet<String> = zip.file_names().map(str::to_string).collect();
     let mut candidates = Vec::new();
+    let mut wolf_roots=HashSet::new();
     for name in &names {
-        if name.split('/').any(|p| p == ".rpgm-toolkit-backups" || p == "RPGMToolkit") { continue; }
-        if let Some(prefix) = name.strip_suffix("Game.ini") {
-            if !names.contains(&format!("{prefix}js/plugins.js")) { candidates.push((prefix.to_string(), "RGSS")); }
-        }
-        if let Some(prefix) = name.strip_suffix("js/plugins.js") {
-            if names.contains(&format!("{prefix}js/rmmz_core.js")) { candidates.push((prefix.to_string(), "MZ")); }
-            else if names.contains(&format!("{prefix}js/rpg_core.js")) { candidates.push((prefix.to_string(), "MV")); }
+        let lower=name.to_ascii_lowercase();
+        if lower.split('/').any(|p|[".rpgm-toolkit-backups","rpgmtoolkit"].contains(&p)){continue}
+        for suffix in ["data/basicdata/commonevent.dat","data.wolf","data.wolfx","data/basicdata.wolf","data/basicdata.wolfx"] {
+            if lower.ends_with(suffix) {wolf_roots.insert(name[..name.len()-suffix.len()].to_string());}
         }
     }
-    if candidates.is_empty() { return Err("Aucun jeu XP/VX/VX Ace/MV/MZ détecté dans le ZIP.".into()); }
+    candidates.extend(wolf_roots.iter().map(|p|(p.clone(),"WOLF")));
+    for name in &names {
+        let lower=name.to_ascii_lowercase();
+        if lower.split('/').any(|p| p == ".rpgm-toolkit-backups" || p == "rpgmtoolkit") { continue; }
+        if lower.ends_with("game.ini") {
+            let prefix=&name[..name.len()-8];
+            if actual(&names,&format!("{prefix}js/plugins.js")).is_none() && actual(&names,&format!("{prefix}www/js/plugins.js")).is_none() && !wolf_roots.iter().any(|p|p.eq_ignore_ascii_case(prefix)) { candidates.push((prefix.to_string(), "RGSS")); }
+        }
+        if lower.ends_with("js/plugins.js") {
+            let prefix=&name[..name.len()-13];
+            if actual(&names,&format!("{prefix}js/rmmz_core.js")).is_some() { candidates.push((prefix.to_string(), "MZ")); }
+            else if actual(&names,&format!("{prefix}js/rpg_core.js")).is_some() { candidates.push((prefix.to_string(), "MV")); }
+        }
+    }
+    candidates.sort_by(|a,b|a.0.to_ascii_lowercase().cmp(&b.0.to_ascii_lowercase()));candidates.dedup_by(|a,b|a.0.eq_ignore_ascii_case(&b.0)&&a.1==b.1);
+    if candidates.is_empty() { return Err("Aucun jeu XP/VX/VX Ace/MV/MZ/WOLF détecté dans le ZIP.".into()); }
     if candidates.len() != 1 { return Err("Ce ZIP contient plusieurs jeux. Fournissez un ZIP contenant un seul jeu.".into()); }
     let (prefix, engine) = candidates.remove(0);
-    if names.contains(&format!("{prefix}.rpgm-toolkit-rgss-pending.json")) { return Err("Restauration RGSS requise en mode Dossier.".into()); }
+    if actual(&names,&format!("{prefix}.rpgm-toolkit-rgss-pending.json")).is_some() { return Err("Restauration RGSS requise en mode Dossier.".into()); }
+    if engine=="WOLF" { return inspect_wolf_zip(&mut zip,&names,&prefix,source_name,path); }
     if engine == "RGSS" { return inspect_rgss_zip(&mut zip,&names,&prefix,source_name,path); }
-    if names.contains(&format!("{prefix}.rpgm-toolkit-pending.json")) { return Err("Ce jeu contient une opération de dossier interrompue. Restaurez-la d’abord en mode Dossier.".into()); }
-    let title = read_text(&mut zip, &format!("{prefix}data/System.json"))?.and_then(|s|serde_json::from_str::<Value>(s.trim_start_matches('\u{feff}')).ok()).and_then(|v|v["gameTitle"].as_str().map(str::to_string)).filter(|s|!s.is_empty()).unwrap_or_else(||source_name.into());
+    if actual(&names,&format!("{prefix}.rpgm-toolkit-pending.json")).is_some() { return Err("Ce jeu contient une opération de dossier interrompue. Restaurez-la d’abord en mode Dossier.".into()); }
+    let title = read_text(&mut zip, actual(&names,&format!("{prefix}data/System.json")).unwrap_or("") )?.and_then(|s|serde_json::from_str::<Value>(s.trim_start_matches('\u{feff}')).ok()).and_then(|v|v["gameTitle"].as_str().map(str::to_string)).filter(|s|!s.is_empty()).unwrap_or_else(||source_name.into());
     eprintln!("RPGM: reading ZIP registry");
-    let registry = read_text(&mut zip, &format!("{prefix}js/plugins.js"))?.ok_or("Liste de plugins absente.")?;
-    let plugin = read_text(&mut zip, &format!("{prefix}{MOD_PATH}"))?;
+    let registry = read_text(&mut zip, actual(&names,&format!("{prefix}js/plugins.js")).ok_or("Liste de plugins absente.")?)?.ok_or("Liste de plugins absente.")?;
+    let plugin = read_text(&mut zip, actual(&names,&format!("{prefix}{MOD_PATH}")).unwrap_or(""))?;
     eprintln!("RPGM: validating ZIP registry");
     let info = Inspection {title, engine:engine.into(), prefix, source_name:source_name.into(), kind:"zip".into(), status:String::new(), plugin_count:0, files:zip.len(), size:path.metadata().map_err(|e|e.to_string())?.len(), fingerprint:String::new(), recovery_needed:false};
     let result = inspect_text(registry, plugin, info);
@@ -195,12 +293,20 @@ pub fn import_mod(path: &Path) -> Result<String, String> {
 pub fn transform_zip(input: &Path, output: &Path, snapshot: &Snapshot, code: &str, uninstall: bool, progress: impl Fn(usize,usize)) -> Result<(), String> {
     let current = inspect_zip(input, &snapshot.info.source_name)?;
     if current.info.fingerprint != snapshot.info.fingerprint { return Err("Le jeu a changé depuis son analyse. Sélectionnez-le à nouveau.".into()); }
+    if crate::wolf::is_wolf(&snapshot.info.engine) { return transform_wolf_zip(input,output,snapshot,uninstall,progress); }
     if crate::rgss::legacy(&snapshot.info.engine) { return transform_rgss_zip(input,output,snapshot,uninstall,progress); }
     let registry = patch_registry(&snapshot.registry, uninstall)?;
-    let prefix = &snapshot.info.prefix; let registry_path = format!("{prefix}js/plugins.js"); let mod_path = format!("{prefix}{MOD_PATH}");
+    let prefix = &snapshot.info.prefix;
+    let mut archive = open_zip(input)?;let names=archive.file_names().map(str::to_string).collect::<HashSet<_>>();
+    let registry_path=actual(&names,&format!("{prefix}js/plugins.js")).ok_or("plugins.js absent.")?.to_string();
+    let wanted=format!("{prefix}{MOD_PATH}");
+    let mod_path=actual(&names,&wanted).map(str::to_string).unwrap_or_else(|| {
+        let js=&registry_path[..registry_path.len()-10];let plugins=format!("{js}plugins/");
+        let directory=names.iter().find(|n|n.to_ascii_lowercase().starts_with(&plugins.to_ascii_lowercase())).map(|n|n[..plugins.len()].to_string()).unwrap_or(plugins);
+        format!("{directory}RPGMToolkit.js")
+    });
     let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e|e.to_string())?.as_nanos();
     let backup = format!("{prefix}.rpgm-toolkit-backups/{stamp}/");
-    let mut archive = open_zip(input)?;
     let count = archive.len();
     let result = (|| {
         let target = File::create(output).map_err(|e|e.to_string())?;
@@ -230,6 +336,49 @@ pub fn transform_zip(input: &Path, output: &Path, snapshot: &Snapshot, code: &st
 #[cfg(test)]
 mod tests {
     use super::*;
+    mod wolf_fixture { include!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../wolf/tests/support/mod.rs")); }
+    #[test]
+    fn wolf_zip_roundtrip_preserves_originals_and_user_saves() {
+        for modern in [false,true] {
+            let dir=tempfile::tempdir().unwrap();let input=dir.path().join("original.zip");
+            let mut zip=ZipWriter::new(File::create(&input).unwrap());let options=SimpleFileOptions::default();
+            let common=wolf_fixture::common(modern);let game=wolf_fixture::game(modern);
+            for (path,bytes) in [("Collection/Game/dAtA/bAsIcDaTa/CommonEvent.dat",common.clone()),("Collection/Game/dAtA/bAsIcDaTa/SysDatabase.dat",wolf_fixture::db(true,modern)),("Collection/Game/dAtA/bAsIcDaTa/CDataBase.dat",wolf_fixture::db(false,modern)),("Collection/Game/dAtA/bAsIcDaTa/Game.dat",game.clone()),("Collection/Game/Game.ini",b"[Game]\nTitle=Wolf\n".to_vec()),("Collection/Game/Save01.sav",b"player save".to_vec()),("Collection/Game/dAtA/RPGMToolkit/toolkit-save-12.sav",b"toolkit save".to_vec())] {
+                zip.start_file(path,options).unwrap();zip.write_all(&bytes).unwrap();
+            }
+            zip.finish().unwrap();let original_bytes=std::fs::read(&input).unwrap();
+            let first=inspect_zip(&input,"wolf.zip").unwrap();assert_eq!(first.info.engine,"WOLF");assert_eq!(first.info.status,"absent");
+            let installed=dir.path().join("installed.zip");transform_zip(&input,&installed,&first,EMBEDDED_MOD,false,|_,_|{}).unwrap();
+            let next=inspect_zip(&installed,"installed.zip").unwrap();assert_eq!(next.previous_mod.as_deref(),Some(crate::wolf::CODE));
+            let updated=dir.path().join("updated.zip");transform_zip(&installed,&updated,&next,EMBEDDED_MOD,false,|_,_|{}).unwrap();
+            let next=inspect_zip(&updated,"updated.zip").unwrap();let removed=dir.path().join("removed.zip");
+            transform_zip(&updated,&removed,&next,EMBEDDED_MOD,true,|_,_|{}).unwrap();assert_eq!(inspect_zip(&removed,"removed.zip").unwrap().info.status,"absent");
+            let mut clean=open_zip(&removed).unwrap();
+            assert_eq!(zip_bytes(&mut clean,"Collection/Game/dAtA/bAsIcDaTa/CommonEvent.dat").unwrap(),common);
+            assert_eq!(zip_bytes(&mut clean,"Collection/Game/dAtA/bAsIcDaTa/Game.dat").unwrap(),game);
+            assert_eq!(zip_bytes(&mut clean,"Collection/Game/Save01.sav").unwrap(),b"player save");
+            assert_eq!(zip_bytes(&mut clean,"Collection/Game/dAtA/RPGMToolkit/toolkit-save-12.sav").unwrap(),b"toolkit save");
+            assert_eq!(std::fs::read(input).unwrap(),original_bytes);
+        }
+    }
+    #[test]
+    fn mixed_case_mvmz_roots_without_www_remain_usable() {
+        for core in ["rpg_core.js","rmmz_core.js"] {
+            let dir=tempfile::tempdir().unwrap();let input=dir.path().join("original.zip");let mut zip=ZipWriter::new(File::create(&input).unwrap());
+            for (path,bytes) in [(format!("Game/DaTa/JS/{core}"),b"// engine".as_slice()),("Game/DaTa/JS/Plugins.js".into(),b"var $plugins = [];".as_slice()),("Game/DaTa/JS/PLUGINS/Other.js".into(),b"// user".as_slice()),("Game/DaTa/DATA/System.json".into(),b"{\"gameTitle\":\"Nested game\"}".as_slice())] {
+                zip.start_file(path,SimpleFileOptions::default()).unwrap();zip.write_all(bytes).unwrap();
+            }
+            zip.finish().unwrap();let first=inspect_zip(&input,"game.zip").unwrap();assert_eq!(first.info.title,"Nested game");
+            let installed=dir.path().join("installed.zip");transform_zip(&input,&installed,&first,EMBEDDED_MOD,false,|_,_|{}).unwrap();
+            let mut patched=open_zip(&installed).unwrap();assert!(patched.by_name("Game/DaTa/JS/PLUGINS/RPGMToolkit.js").is_ok());assert!(patched.by_name("Game/DaTa/JS/Plugins.js").is_ok());
+        }
+    }
+    #[test]
+    fn protected_wolf_zip_is_refused() {
+        let dir=tempfile::tempdir().unwrap();let input=dir.path().join("protected.zip");let mut zip=ZipWriter::new(File::create(&input).unwrap());
+        zip.start_file("Game/Data.wolf",SimpleFileOptions::default()).unwrap();zip.write_all(b"protected").unwrap();zip.finish().unwrap();
+        assert!(inspect_zip(&input,"protected.zip").unwrap_err().contains("protégée"));
+    }
     fn fixture(name:&str)->(tempfile::TempDir,std::path::PathBuf) {
         let dir=tempfile::tempdir().unwrap();let path=dir.path().join("game.zip");let mut zip=ZipWriter::new(File::create(&path).unwrap());
         let files=[("Game/www/js/rpg_core.js","// MV"),("Game/www/js/plugins.js", "// generated\nvar $plugins = [{\"name\":\"Other\",\"status\":true,\"parameters\":{\"nested\":\"{\\\"a\\\":1}\"}}];"),("Game/www/data/System.json","{\"gameTitle\":\"Aster\"}"),(name,"original media data")];

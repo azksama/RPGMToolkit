@@ -31,6 +31,7 @@ import android.provider.DocumentsContract
 @TauriPlugin
 class StoragePlugin(private val activity: Activity) : Plugin(activity) {
     private val rgss = RgssStorage(activity)
+    private val wolf = WolfStorage(activity)
     private val io = Executors.newSingleThreadExecutor()
     private val roots = mutableMapOf<String, DocumentFile>()
     private val rootTokens = mutableMapOf<String, String>()
@@ -63,7 +64,7 @@ class StoragePlugin(private val activity: Activity) : Plugin(activity) {
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
     private fun write(parent: DocumentFile, name: String, content: ByteArray): DocumentFile {
-        val file = parent.findFile(name) ?: parent.createFile("application/octet-stream", name) ?: error("Création refusée : $name")
+        val file = parent.toolkitChild(name) ?: parent.createFile("application/octet-stream", name) ?: error("Création refusée : $name")
         require(file.isFile && file.canWrite()) { "Écriture refusée : $name" }
         activity.contentResolver.openOutputStream(file.uri, "wt")?.use { it.write(content); it.flush() } ?: error("Écriture impossible : $name")
         require(hash(bytes(file)) == hash(content)) { "La vérification de $name a échoué." }
@@ -71,7 +72,7 @@ class StoragePlugin(private val activity: Activity) : Plugin(activity) {
     }
     private fun write(parent: DocumentFile, name: String, content: String) = write(parent, name, content.toByteArray(Charsets.UTF_8))
     private fun dir(parent: DocumentFile, name: String): DocumentFile {
-        val directory = parent.findFile(name) ?: parent.createDirectory(name) ?: error("Création du dossier $name refusée.")
+        val directory = parent.toolkitChild(name) ?: parent.createDirectory(name) ?: error("Création du dossier $name refusée.")
         require(directory.isDirectory) { "$name est déjà utilisé par un fichier." }
         return directory
     }
@@ -105,17 +106,17 @@ class StoragePlugin(private val activity: Activity) : Plugin(activity) {
         report.games.forEach { candidate ->
             val token = register(candidate.node)
             val value = JSObject().put("title", candidate.node.name ?: "Jeu")
-            if (candidate.legacy && candidate.node.findFile("Game.ini") == null) value.put("error", "Game.ini absent ou moteur 2000/2003 non pris en charge.")
+            if (candidate.legacy && candidate.node.toolkitChild("Game.ini") == null) value.put("error", "Game.ini absent ou moteur 2000/2003 non pris en charge.")
             games.put(value.put("token", token).put("path", candidate.path))
         }
         return JSObject().put("games", games).put("warnings", JSONArray(report.warnings))
     }
     private fun compatibility(root: DocumentFile): String {
         require(root.canRead() && root.canWrite()) { "Dossier en lecture seule ou accès refusé." }
-        val js = root.findFile("js") ?: error("Dossier js absent.")
+        val js = root.toolkitChild("js") ?: error("Dossier js absent.")
         require(js.canWrite()) { "Le dossier js est en lecture seule." }
-        val mv = js.findFile("rpg_core.js")?.takeIf { it.isFile }
-        val mz = js.findFile("rmmz_core.js")?.takeIf { it.isFile }
+        val mv = js.toolkitChild("rpg_core.js")?.takeIf { it.isFile }
+        val mz = js.toolkitChild("rmmz_core.js")?.takeIf { it.isFile }
         require((mv != null) != (mz != null)) { "Moteur MV/MZ absent ou ambigu." }
         val core = text((mz ?: mv)!!)
         val version = Regex("RPGMAKER_VERSION\\s*=\\s*[\"'](\\d+)\\.(\\d+)(?:\\.\\d+)?[\"']").find(core)
@@ -124,38 +125,39 @@ class StoragePlugin(private val activity: Activity) : Plugin(activity) {
         require(major == 1) { "Version de moteur inconnue : MV/MZ 1.x requis." }
         val prefix = if (mz != null) "rmmz" else "rpg"
         listOf("plugins.js", "main.js", "${prefix}_managers.js", "${prefix}_objects.js", "${prefix}_scenes.js", "${prefix}_sprites.js", "${prefix}_windows.js").forEach {
-            require(js.findFile(it)?.isFile == true) { "Fichier requis absent : js/$it" }
+            require(js.toolkitChild(it)?.isFile == true) { "Fichier requis absent : js/$it" }
         }
-        require(js.findFile("plugins.js")?.canWrite() == true) { "plugins.js est en lecture seule." }
-        js.findFile("plugins")?.let { plugins ->
+        require(js.toolkitChild("plugins.js")?.canWrite() == true) { "plugins.js est en lecture seule." }
+        js.toolkitChild("plugins")?.let { plugins ->
             require(plugins.isDirectory && plugins.canWrite()) { "Dossier js/plugins inaccessible." }
-            plugins.findFile("RPGMToolkit.js")?.let { require(it.isFile && it.canWrite()) { "RPGMToolkit.js est en lecture seule." } }
+            plugins.toolkitChild("RPGMToolkit.js")?.let { require(it.isFile && it.canWrite()) { "RPGMToolkit.js est en lecture seule." } }
         }
-        require(root.findFile("index.html")?.isFile == true) { "Fichier requis absent : index.html" }
-        val system = root.findFile("data")?.findFile("System.json") ?: error("Fichier requis absent : data/System.json")
+        require(root.toolkitChild("index.html")?.isFile == true) { "Fichier requis absent : index.html" }
+        val system = root.toolkitChild("data")?.toolkitChild("System.json") ?: error("Fichier requis absent : data/System.json")
         JSONObject(text(system).removePrefix("\uFEFF"))
         return if (mz != null) "MZ" else "MV"
     }
     private fun pending(root: DocumentFile): Pair<DocumentFile, JSONObject>? {
-        val marker = root.findFile(markerName) ?: return null
+        val marker = root.toolkitChild(markerName) ?: return null
         val data = JSONObject(text(marker))
         val id = data.getString("backup")
         require(Regex("[a-zA-Z0-9-]+").matches(id)) { "Journal de restauration invalide." }
-        val backup = root.findFile(".rpgm-toolkit-backups")?.findFile(id) ?: error("La copie de secours de l’opération interrompue est introuvable.")
+        val backup = root.toolkitChild(".rpgm-toolkit-backups")?.toolkitChild(id) ?: error("La copie de secours de l’opération interrompue est introuvable.")
         return Pair(backup, data)
     }
     private fun isRgss(root: DocumentFile): Boolean {
-        val js = root.findFile("js")
-        return root.findFile(RgssStorage.MARKER) != null || (root.findFile("Game.ini") != null && js?.findFile("rpg_core.js") == null && js?.findFile("rmmz_core.js") == null)
+        val js = root.toolkitChild("js")
+        return root.toolkitChild(RgssStorage.MARKER) != null || (root.toolkitChild("Game.ini") != null && js?.toolkitChild("rpg_core.js") == null && js?.toolkitChild("rmmz_core.js") == null)
     }
     private fun inspect(root: DocumentFile): JSObject {
+        if (WolfStorage.detected(root)) return wolf.inspect(root)
         if (isRgss(root)) return rgss.inspect(root)
         val detectedEngine = compatibility(root)
-        val js = root.findFile("js") ?: error("Dossier js absent.")
+        val js = root.toolkitChild("js") ?: error("Dossier js absent.")
         val recovery = pending(root)
-        val registry = if (recovery != null) text(recovery.first.findFile("plugins.js") ?: error("Copie de secours absente.")) else text(js.findFile("plugins.js") ?: error("plugins.js absent."))
-        val plugin = if (recovery != null) recovery.first.findFile("RPGMToolkit.js")?.let { text(it) } else js.findFile("plugins")?.findFile("RPGMToolkit.js")?.let { text(it) }
-        val title = try { root.findFile("data")?.findFile("System.json")?.let { JSONObject(text(it).removePrefix("\uFEFF")).optString("gameTitle") } } catch (_: Exception) { null }
+        val registry = if (recovery != null) text(recovery.first.toolkitChild("plugins.js") ?: error("Copie de secours absente.")) else text(js.toolkitChild("plugins.js") ?: error("plugins.js absent."))
+        val plugin = if (recovery != null) recovery.first.toolkitChild("RPGMToolkit.js")?.let { text(it) } else js.toolkitChild("plugins")?.toolkitChild("RPGMToolkit.js")?.let { text(it) }
+        val title = try { root.toolkitChild("data")?.toolkitChild("System.json")?.let { JSONObject(text(it).removePrefix("\uFEFF")).optString("gameTitle") } } catch (_: Exception) { null }
         return JSObject().put("kind", "folder").put("registry", registry).put("plugin", plugin ?: JSONObject.NULL)
             .put("title", title?.takeIf { it.isNotBlank() } ?: root.name ?: "Jeu RPG Maker")
             .put("engine", detectedEngine)
@@ -218,32 +220,46 @@ class StoragePlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
     @Command fun inspectFolder(invoke: Invoke) { val args = invoke.parseArgs(FolderArgs::class.java); background(invoke) { inspect(checkedRoot(args.token)) } }
+    @Command fun openWolf(invoke: Invoke) {
+        try {
+            val root=checkedRoot(invoke.parseArgs(FolderArgs::class.java).token)
+            require(WolfStorage.detected(root)) { "Ce jeu n’utilise pas WOLF." }
+            require(!WolfOverlayService.running) { "Le menu WOLF est déjà ouvert. Utilisez le bouton flottant ou sa notification." }
+            WolfSession.root=root
+            if(!android.provider.Settings.canDrawOverlays(activity)) {
+                WolfSession.awaitingPermission=true
+                activity.startActivity(Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,Uri.parse("package:${activity.packageName}")))
+                invoke.resolve(JSObject().put("permission",true))
+            } else { (activity as? MainActivity)?.requestWolfNotifications();activity.startForegroundService(Intent(activity,WolfOverlayService::class.java));invoke.resolve(JSObject().put("started",true)) }
+        }catch(e: Exception){invoke.reject(e.message ?: "Menu WOLF indisponible.")}
+    }
     @Command fun applyFolder(invoke: Invoke) {
         val args = invoke.parseArgs(ApplyArgs::class.java)
         background(invoke) {
             val root = checkedRoot(args.token)
+            if (WolfStorage.detected(root)) { require(!WolfOverlayService.running) { "Fermez le menu flottant avant de modifier le mod WOLF." }; return@background wolf.apply(root, args) }
             if (isRgss(root)) return@background rgss.apply(root, args)
             compatibility(root)
             require(pending(root) == null) { "Restaurez d’abord l’opération interrompue." }
-            val js = root.findFile("js") ?: error("Dossier js absent.")
-            val registryFile = js.findFile("plugins.js") ?: error("plugins.js absent.")
+            val js = root.toolkitChild("js") ?: error("Dossier js absent.")
+            val registryFile = js.toolkitChild("plugins.js") ?: error("plugins.js absent.")
             val pluginDir = dir(js, "plugins")
             val oldRegistry = bytes(registryFile)
-            val oldPlugin = pluginDir.findFile("RPGMToolkit.js")?.let { bytes(it) }
+            val oldPlugin = pluginDir.toolkitChild("RPGMToolkit.js")?.let { bytes(it) }
             val oldText = text(registryFile)
-            require(fingerprint(oldText, pluginDir.findFile("RPGMToolkit.js")?.let { text(it) }) == args.expected) { "Le jeu a changé depuis l’analyse. Sélectionnez-le à nouveau." }
+            require(fingerprint(oldText, pluginDir.toolkitChild("RPGMToolkit.js")?.let { text(it) }) == args.expected) { "Le jeu a changé depuis l’analyse. Sélectionnez-le à nouveau." }
             val backupId = "${System.currentTimeMillis()}-${UUID.randomUUID()}"
             val backup = dir(dir(root, ".rpgm-toolkit-backups"), backupId)
             write(backup, "plugins.js", oldRegistry)
             if (oldPlugin != null) write(backup, "RPGMToolkit.js", oldPlugin)
             val journal = JSONObject().put("backup", backupId).put("hadPlugin", oldPlugin != null).put("registrySha256", hash(oldRegistry)).put("pluginSha256", oldPlugin?.let { hash(it) } ?: JSONObject.NULL).put("action", if (args.uninstall) "uninstall" else "install")
             write(backup, "manifest.json", journal.toString(2))
-            require(fingerprint(text(registryFile), pluginDir.findFile("RPGMToolkit.js")?.let { text(it) }) == args.expected) { "Les fichiers du jeu ont changé pendant la sauvegarde." }
+            require(fingerprint(text(registryFile), pluginDir.toolkitChild("RPGMToolkit.js")?.let { text(it) }) == args.expected) { "Les fichiers du jeu ont changé pendant la sauvegarde." }
             val marker = write(root, markerName, journal.toString())
             try {
                 if (!args.uninstall) write(pluginDir, "RPGMToolkit.js", args.plugin ?: error("Mod absent."))
                 write(js, "plugins.js", args.registry)
-                if (args.uninstall) pluginDir.findFile("RPGMToolkit.js")?.let { require(it.delete()) { "Impossible de retirer RPGMToolkit.js." } }
+                if (args.uninstall) pluginDir.toolkitChild("RPGMToolkit.js")?.let { require(it.delete()) { "Impossible de retirer RPGMToolkit.js." } }
                 require(marker.delete()) { "Impossible de finaliser le journal. Une restauration est nécessaire." }
             } catch (e: Exception) {
                 try { restore(root); } catch (rollback: Exception) { error("${e.message} Restauration incomplète : ${rollback.message}. Rouvrez ce dossier pour restaurer la copie de secours.") }
@@ -253,19 +269,20 @@ class StoragePlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
     private fun restore(root: DocumentFile) {
-        if (root.findFile(RgssStorage.MARKER) != null) { rgss.restore(root); return }
+        if (root.toolkitChild(WolfStorage.PENDING) != null) { require(!WolfOverlayService.running); wolf.restore(root); return }
+        if (root.toolkitChild(RgssStorage.MARKER) != null) { rgss.restore(root); return }
         val (backup, data) = pending(root) ?: return
-        val registry = bytes(backup.findFile("plugins.js") ?: error("Copie de plugins.js absente."))
+        val registry = bytes(backup.toolkitChild("plugins.js") ?: error("Copie de plugins.js absente."))
         require(hash(registry) == data.getString("registrySha256")) { "Copie de secours du registre endommagée." }
-        val js = root.findFile("js") ?: error("Dossier js absent.")
+        val js = root.toolkitChild("js") ?: error("Dossier js absent.")
         val pluginDir = dir(js, "plugins")
         if (data.getBoolean("hadPlugin")) {
-            val previous = bytes(backup.findFile("RPGMToolkit.js") ?: error("Copie du mod absente."))
+            val previous = bytes(backup.toolkitChild("RPGMToolkit.js") ?: error("Copie du mod absente."))
             require(hash(previous) == data.getString("pluginSha256")) { "Copie de secours du plugin endommagée." }
             write(pluginDir, "RPGMToolkit.js", previous)
-        } else pluginDir.findFile("RPGMToolkit.js")?.let { require(it.delete()) { "Suppression du plugin impossible." } }
+        } else pluginDir.toolkitChild("RPGMToolkit.js")?.let { require(it.delete()) { "Suppression du plugin impossible." } }
         write(js, "plugins.js", registry)
-        require(root.findFile(markerName)?.delete() == true) { "Suppression du journal impossible." }
+        require(root.toolkitChild(markerName)?.delete() == true) { "Suppression du journal impossible." }
     }
     @Command fun recoverFolder(invoke: Invoke) { val args = invoke.parseArgs(FolderArgs::class.java); background(invoke) { val root = checkedRoot(args.token); restore(root); inspect(root) } }
     @Command fun exportZip(invoke: Invoke) {

@@ -1,6 +1,6 @@
 [package]
 name = "rpgm-installer"
-version = "1.8.1"
+version = "1.9.0"
 edition = "2021"
 
 [lib]
@@ -20,8 +20,10 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 json5 = "0.4"
 base64 = "0.22"
 flate2 = "1"
+wolf-toolkit = { path = "../../wolf" }
 
 [dev-dependencies]
+lz4_flex = { version = "0.11", default-features = false, features = ["std", "safe-encode", "safe-decode"] }
 tempfile = "3"
 
 [features]

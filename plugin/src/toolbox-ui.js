@@ -10,6 +10,7 @@ function installToolboxUI() {
     var home = document.createElement('section'); home.className = 'rt-home';
     home.innerHTML = '<header class="rt-home-header">' + button('✕','tool-close','rt-close') + '<h1>Toolbox</h1><span class="rt-muted">Jeu en pause</span></header><nav class="rt-home-content" aria-label="Modes Toolbox"></nav>';
     $('.rt-panel').insertBefore(home, $('.rt-header'));
+    if (toolkitHost) home.querySelector('.rt-muted').textContent = 'WOLF RPG · Winlator';
     home.querySelector('[data-action="tool-close"]').setAttribute('aria-label','Fermer le Toolkit');
     var line = $('.rt-search-line'); line.insertBefore($('[data-action="close"]'),line.firstChild);
     var back = document.createElement('button'); back.type = 'button'; back.textContent = '‹'; back.dataset.action = 'tool-home'; back.setAttribute('aria-label','Retour à Toolbox');
@@ -44,6 +45,7 @@ function showToolboxHome() {
         ['history','Historique','Annuler ou rétablir une modification'],
         ['settings','Paramètres','Langue, affichage et raccourcis']
     ];
+    if (toolkitHost) entries = toolkitHost.modes(entries);
     $('.rt-home-content').innerHTML = entries.map(function(e) {
         var toggle = e[0] === 'god' || e[0] === 'noclip';
         return '<button type="button" data-action="tool-'+e[0]+'"'+(toggle ? ' role="switch" aria-checked="'+state[e[0]]+'" aria-label="'+e[1]+'"' : '')+'><strong>'+e[1]+'</strong><span>'+e[2]+'</span>'+(toggle ? '<b class="rt-toggle-track" aria-hidden="true"></b>' : '<b aria-hidden="true">›</b>')+'</button>';
@@ -116,6 +118,7 @@ function loadToolMap() {
 function toolboxAction(action, node) {
     if (action.indexOf('tool-') !== 0) return false;
     var mode = action.slice(5);
+    if (toolkitHost && toolkitHost.toolAction(mode, node)) return true;
     if (mode === 'close') closeToolkit();
     else if (mode === 'god' || mode === 'noclip') { if (mode === 'god') gameTools.setGod(!gameTools.state().god); else gameTools.setNoclip(!gameTools.state().noclip); node.setAttribute('aria-checked', String(gameTools.state()[mode])); }
     else if (mode === 'home') showToolboxHome();
@@ -132,6 +135,7 @@ function toolboxAction(action, node) {
     return true;
 }
 function toolboxSubmit(form) {
+    if (toolkitHost && toolkitHost.submit(form)) return true;
     if(form==='tool-save-place'){gameTools.travel.remember($('#rt-place-name').value);$('#rt-place-name').value='';renderPlaces();say('Emplacement enregistré.');return true;}
     if (form === 'tool-resources') { gameTools.resources($('#rt-tool-actor').value,$('#rt-tool-hp').value,$('#rt-tool-mp').value,$('#rt-tool-tp').value,false); dirty=true;updateToolValues();say('Ressources mises à jour.');return true; }
     if (form === 'tool-stats') { gameTools.stat($('#rt-tool-actor').value,$('#rt-tool-param').value,$('#rt-tool-value').value);dirty=true;updateToolValues();say('Statistique mise à jour.');return true; }

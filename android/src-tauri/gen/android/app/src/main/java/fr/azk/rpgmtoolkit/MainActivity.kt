@@ -10,6 +10,17 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 
 class MainActivity : TauriActivity() {
+  fun requestWolfNotifications() {
+    if (android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 190)
+  }
+  override fun onResume() {
+    super.onResume()
+    if (WolfSession.awaitingPermission && android.provider.Settings.canDrawOverlays(this) && WolfSession.root != null) {
+      WolfSession.awaitingPermission=false
+      requestWolfNotifications()
+      startForegroundService(android.content.Intent(this,WolfOverlayService::class.java))
+    }
+  }
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge(statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT), navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT))
     super.onCreate(savedInstanceState)

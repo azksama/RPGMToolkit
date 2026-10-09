@@ -23,16 +23,16 @@ class RgssStorage(private val activity: Activity) {
     }
     private fun write(parent: DocumentFile, name: String, data: ByteArray) {
         require(data.size <= limit)
-        val f = parent.findFile(name) ?: parent.createFile("application/octet-stream", name) ?: error("Création refusée : $name")
+        val f = parent.toolkitChild(name) ?: parent.createFile("application/octet-stream", name) ?: error("Création refusée : $name")
         require(f.isFile && f.canWrite()) { "Écriture refusée : $name" }
         activity.contentResolver.openOutputStream(f.uri, "wt")?.use { it.write(data); it.flush() } ?: error("Écriture refusée : $name")
         require(read(f).contentEquals(data)) { "Vérification échouée : $name" }
     }
     private fun directory(parent: DocumentFile, name: String): DocumentFile {
-        val d = parent.findFile(name) ?: parent.createDirectory(name) ?: error("Création du dossier refusée.")
+        val d = parent.toolkitChild(name) ?: parent.createDirectory(name) ?: error("Création du dossier refusée.")
         require(d.isDirectory && d.canWrite()) { "Dossier non accessible : $name" }; return d
     }
-    private fun remove(parent: DocumentFile, name: String) { parent.findFile(name)?.let { require(it.isFile && it.delete()) { "Suppression refusée : $name" } } }
+    private fun remove(parent: DocumentFile, name: String) { parent.toolkitChild(name)?.let { require(it.isFile && it.delete()) { "Suppression refusée : $name" } } }
     private fun find(root: DocumentFile, path: String): DocumentFile? {
         var current: DocumentFile? = root
         path.split('/').forEach { segment ->
@@ -55,22 +55,22 @@ class RgssStorage(private val activity: Activity) {
     }
     private fun backup(root: DocumentFile, marker: JSONObject): DocumentFile {
         val id = marker.getString("backup"); require(Regex("[a-zA-Z0-9-]+").matches(id))
-        return root.findFile(".rpgm-toolkit-backups")?.findFile(id) ?: error("Copie de secours RGSS absente.")
+        return root.toolkitChild(".rpgm-toolkit-backups")?.toolkitChild(id) ?: error("Copie de secours RGSS absente.")
     }
     private fun current(root: DocumentFile): JSONObject {
-        val ini = read(root.findFile("Game.ini") ?: error("Game.ini absent."))
-        val own = root.findFile("RPGMToolkit")
-        val original = own?.findFile("original-game.ini")?.let { read(it) } ?: ini
+        val ini = read(root.toolkitChild("Game.ini") ?: error("Game.ini absent."))
+        val own = root.toolkitChild("RPGMToolkit")
+        val original = own?.toolkitChild("original-game.ini")?.let { read(it) } ?: ini
         RgssFormat.scriptPath(original)
         require(!RgssFormat.scriptPath(original).first.startsWith("RPGMToolkit/")) { "Copie originale de Game.ini absente." }
-        require(own == null || own.findFile("original-game.ini") != null) { "Dossier RPGMToolkit déjà utilisé par un autre contenu." }
+        require(own == null || own.toolkitChild("original-game.ini") != null) { "Dossier RPGMToolkit déjà utilisé par un autre contenu." }
         return JSONObject().put("ini", encode(ini)).put("originalIni", encode(original)).put("scripts", encode(scripts(root, ini)))
     }
     fun inspect(root: DocumentFile): JSObject {
         require(root.canRead() && root.canWrite()) { "Dossier en lecture seule." }
-        val pending = root.findFile(MARKER)?.let { JSONObject(read(it).toString(Charsets.UTF_8)) }
+        val pending = root.toolkitChild(MARKER)?.let { JSONObject(read(it).toString(Charsets.UTF_8)) }
         val state = if (pending != null) {
-            val data = read(backup(root, pending).findFile("state.json") ?: error("État RGSS de secours absent."))
+            val data = read(backup(root, pending).toolkitChild("state.json") ?: error("État RGSS de secours absent."))
             require(hash(data) == pending.getString("stateHash")); JSONObject(data.toString(Charsets.UTF_8))
         } else current(root)
         val ini = decode(state.getString("originalIni"))
@@ -80,7 +80,7 @@ class RgssStorage(private val activity: Activity) {
     }
     private fun fingerprint(registry: String): String = hash(registry.toByteArray(Charsets.UTF_8) + byteArrayOf(0, 2))
     fun apply(root: DocumentFile, args: ApplyArgs): JSObject {
-        require(root.findFile(MARKER) == null) { "Restaurez d’abord l’opération RGSS interrompue." }
+        require(root.toolkitChild(MARKER) == null) { "Restaurez d’abord l’opération RGSS interrompue." }
         val before = current(root); require(fingerprint(before.toString()) == args.expected) { "Le jeu a changé depuis l’analyse." }
         val patched = JSONObject(args.registry)
         val original = decode(before.getString("originalIni")); val target = RgssFormat.target(original)
@@ -89,9 +89,9 @@ class RgssStorage(private val activity: Activity) {
         val newScripts = decode(patched.getString("scripts")); require(newScripts.size <= RgssFormat.LIMIT && newScripts.take(2) == listOf(4.toByte(),8.toByte())) { "Scripts modifiés invalides." }
         val id = "${System.currentTimeMillis()}-${UUID.randomUUID()}"
         val backup = directory(directory(root, ".rpgm-toolkit-backups"), id)
-        val oldDir = root.findFile("RPGMToolkit")
-        val oldScripts = oldDir?.findFile(target)?.let { read(it) }
-        val oldOriginal = oldDir?.findFile("original-game.ini")?.let { read(it) }
+        val oldDir = root.toolkitChild("RPGMToolkit")
+        val oldScripts = oldDir?.toolkitChild(target)?.let { read(it) }
+        val oldOriginal = oldDir?.toolkitChild("original-game.ini")?.let { read(it) }
         val state = before.toString().toByteArray(Charsets.UTF_8)
         write(backup, "state.json", state)
         if (oldScripts != null) write(backup, target, oldScripts)
@@ -117,15 +117,15 @@ class RgssStorage(private val activity: Activity) {
         return inspect(root)
     }
     fun restore(root: DocumentFile) {
-        val marker = root.findFile(MARKER) ?: return
+        val marker = root.toolkitChild(MARKER) ?: return
         val journal = JSONObject(read(marker).toString(Charsets.UTF_8)); val backup = backup(root, journal)
-        val stateBytes = read(backup.findFile("state.json") ?: error("État RGSS absent.")); require(hash(stateBytes) == journal.getString("stateHash"))
+        val stateBytes = read(backup.toolkitChild("state.json") ?: error("État RGSS absent.")); require(hash(stateBytes) == journal.getString("stateHash"))
         val state = JSONObject(stateBytes.toString(Charsets.UTF_8)); val original = decode(state.getString("originalIni")); val target = RgssFormat.target(original)
         require(target == journal.getString("target"))
         val own = directory(root, "RPGMToolkit")
         for ((name, key) in listOf(target to "scriptHash", "original-game.ini" to "originalHash")) {
             if (journal.isNull(key)) remove(own, name)
-            else { val data = read(backup.findFile(name) ?: error("Copie RGSS absente : $name")); require(hash(data) == journal.getString(key)); write(own, name, data) }
+            else { val data = read(backup.toolkitChild(name) ?: error("Copie RGSS absente : $name")); require(hash(data) == journal.getString(key)); write(own, name, data) }
         }
         write(root, "Game.ini", decode(state.getString("ini")))
         if (own.listFiles().isEmpty()) require(own.delete())

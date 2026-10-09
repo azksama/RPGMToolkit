@@ -4,6 +4,7 @@
 -keep class fr.azk.rpgmtoolkit.ApplyArgs { *; }
 -keep class fr.azk.rpgmtoolkit.ExportArgs { *; }
 -keep class fr.azk.rpgmtoolkit.FolderArgs { *; }
+-keepclassmembers class fr.azk.rpgmtoolkit.WolfOverlayService$NativeBridge { @android.webkit.JavascriptInterface <methods>; }
 # You can control the set of applied configuration files using the
 # proguardFiles setting in build.gradle.
 #
