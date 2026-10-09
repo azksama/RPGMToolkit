@@ -44,6 +44,7 @@ class WolfOverlayService : Service() {
     private lateinit var gameFiles: androidx.documentfile.provider.DocumentFile
     private var bootstrap="{}"
     private var ready=false
+    private var showWhenReady=false
     private var expanded=false
     private var keyboardVisible=false
     private var showButton=true
@@ -56,23 +57,26 @@ class WolfOverlayService : Service() {
         val channel=NotificationChannel("wolf-toolkit","WOLF Toolkit",NotificationManager.IMPORTANCE_LOW)
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         fun action(name: String, code: Int)=PendingIntent.getService(this,code,Intent(this,WolfOverlayService::class.java).setAction(name),PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        val notification=NotificationCompat.Builder(this,"wolf-toolkit").setSmallIcon(android.R.drawable.ic_menu_edit).setContentTitle("WOLF Toolkit").setContentText("Éditeur flottant · Winlator").setOngoing(true).setContentIntent(action("show",1)).addAction(0,"Ouvrir",action("show",1)).addAction(0,"Arrêter",action("stop",2)).build()
+        val notification=NotificationCompat.Builder(this,"wolf-toolkit").setSmallIcon(android.R.drawable.ic_menu_edit).setContentTitle("WOLF Toolkit").setContentText("Toolbox · Winlator").setOngoing(true).setContentIntent(action("show",1)).addAction(0,"Afficher Toolbox",action("show",1)).addAction(0,"Arrêter",action("stop",2)).build()
         startForeground(190,notification)
         if(!Settings.canDrawOverlays(this) || WolfSession.root==null) { stopSelf();return }
+        running=true
         val root=WolfSession.root!!
         io.execute {
             try {
                 prepare(root)
                 handler.post {
                     if(active!==this@WolfOverlayService)return@post
-                    try { initialize();running=true }catch(e: Exception){initializationFailed(e)}
+                    try { initialize() }catch(e: Exception){initializationFailed(e)}
                 }
             }catch(e: Exception){handler.post {if(active===this@WolfOverlayService)initializationFailed(e)}}
         }
     }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if(intent?.action=="stop")stopSelf()
-        else if(intent?.action=="show" && ready)expand()
+        else if(intent?.action=="show") {
+            if(ready)expand() else showWhenReady=true
+        }
         return START_NOT_STICKY
     }
     private fun initializationFailed(error: Exception) {
@@ -87,7 +91,7 @@ class WolfOverlayService : Service() {
         fun hash(value: String)=MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8)).joinToString(""){"%02x".format(it)}
         require(hash(catalogText)==marker.getString("catalogSha256")) { "Catalogue WOLF modifié." }
         val catalog=JSONArray(catalogText);require(catalog.length() in 1..WolfStorage.MAX_CATALOG_ENTRIES) { "Catalogue WOLF vide ou invalide." }
-        transport=WolfTransport(storage,own,catalog)
+        transport=WolfTransport(storage,own,BooleanArray(catalog.length()) { catalog.getJSONObject(it).getBoolean("string") })
         bootstrap=JSONObject().put("project",hash(root.uri.toString())).put("title",root.name).put("catalog",catalog).put("version",marker.getString("version")).toString()
     }
     private fun initialize() {
@@ -99,6 +103,7 @@ class WolfOverlayService : Service() {
         }
         buttonParams=WindowManager.LayoutParams(dp(88),dp(34),WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,android.graphics.PixelFormat.TRANSLUCENT).apply {gravity=Gravity.TOP or Gravity.LEFT;x=dp(8);y=dp(16)}
         windows.addView(bubble,buttonParams)
+        bubble.setOnClickListener { expand() }
         var downX=0f;var downY=0f;var initialX=0;var initialY=0;var moved=false
         bubble.setOnTouchListener { _,event ->
             when(event.actionMasked) {
@@ -109,7 +114,7 @@ class WolfOverlayService : Service() {
                 }
                 MotionEvent.ACTION_UP -> {
                     if(moved) {positionX=100.0*buttonParams.x/maxX().coerceAtLeast(1);positionY=100.0*buttonParams.y/maxY().coerceAtLeast(1);javascript("window.ToolkitHost.position($positionX,$positionY)")}
-                    else expand()
+                    else bubble.performClick()
                 }
             };true
         }
@@ -141,7 +146,18 @@ class WolfOverlayService : Service() {
             webViewClient=object: WebViewClient() {
                 override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? = assets.shouldInterceptRequest(request.url)
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean = true
-                override fun onPageFinished(view: WebView, url: String) { if(url=="https://appassets.androidplatform.net/assets/wolf/index.html"){ready=true;if(expanded)javascript("window.ToolkitHost.show()")} }
+                override fun onPageFinished(view: WebView, url: String) {
+                    if(url!="https://appassets.androidplatform.net/assets/wolf/index.html")return
+                    view.evaluateJavascript("Boolean(window.ToolkitHost && window.ToolkitHost.show)") { loaded ->
+                        if(active!==this@WolfOverlayService)return@evaluateJavascript
+                        if(loaded!="true")initializationFailed(IllegalStateException("Chargement de Toolbox impossible."))
+                        else {
+                            ready=true
+                            if(showWhenReady) {showWhenReady=false;expand()}
+                            else if(expanded)javascript("window.ToolkitHost.show()")
+                        }
+                    }
+                }
             }
             webChromeClient=object: WebChromeClient() {
                 override fun onShowFileChooser(view: WebView, callback: ValueCallback<Array<Uri>>, params: FileChooserParams): Boolean {

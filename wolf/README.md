@@ -1,12 +1,12 @@
-# WOLF Toolkit 1.9.2
+# WOLF Toolkit 1.9.3
 
 Éditeur mobile flottant pour WOLF RPG Editor 2 et 3 sous Winlator. L’interface réutilise le Toolkit MV/MZ : recherche, favoris, sélection multiple, édition en fenêtre, gel, historique, alias anglais et traductions persistantes.
 
 ## Installation
 
 1. Fermer le jeu et sélectionner son dossier, ou un dossier parent, dans **Dossiers de jeux**.
-2. Installer le mod inclus, puis choisir **Ouvrir l’éditeur** et autoriser l’affichage par-dessus les applications.
-3. Lancer `Game.exe` dans Winlator depuis ce même dossier partagé. Le bouton **Toolbox** ouvre le menu et peut être déplacé.
+2. Installer le mod inclus, puis choisir **Toolbox** et autoriser l’affichage par-dessus les applications.
+3. Fermer le panneau, puis lancer `Game.exe` dans Winlator depuis ce même dossier partagé. Le bouton **Toolbox** ouvre le menu et peut être déplacé.
 
 Un ZIP contenant un seul jeu peut également être installé ou désinstallé. Extraire le ZIP produit, puis sélectionner son dossier dans l’application pour ouvrir le menu flottant.
 

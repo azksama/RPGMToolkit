@@ -1,5 +1,14 @@
 # Versions
 
+## 1.9.3 — Accès au menu WOLF
+
+- Le bouton Toolbox de la bibliothèque ouvre directement le menu flottant, y compris après autorisation Android.
+- Réouverture d’un menu déjà lancé, même si le bouton flottant est masqué ; récupération via la notification.
+- Réouverture sans seconde lecture du registre, évitant une saturation mémoire sur les gros catalogues WOLF.
+- Réduction de la mémoire conservée par le service après chargement du catalogue.
+- Demandes d’ouverture conservées pendant le chargement et refus du changement de jeu tant que le menu actuel est actif.
+- Contrôle du chargement du panneau et bouton flottant accessible au clic.
+
 ## 1.9.2 — Transfert des grands jeux
 
 - Correction de l’échec Android « String length exceeds the maximum length » pendant l’installation WOLF.

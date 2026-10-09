@@ -220,17 +220,26 @@ class StoragePlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
     @Command fun inspectFolder(invoke: Invoke) { val args = invoke.parseArgs(FolderArgs::class.java); background(invoke) { inspect(checkedRoot(args.token)) } }
+    @Command fun showWolf(invoke: Invoke) {
+        try {
+            val root=checkedRoot(invoke.parseArgs(FolderArgs::class.java).token)
+            val shown=WolfOverlayService.running
+            require(!shown || WolfSession.root?.let { identity(it)==identity(root) }==true) { "Arrêtez le menu WOLF actuel avant d’ouvrir un autre jeu." }
+            if(shown)activity.startForegroundService(Intent(activity,WolfOverlayService::class.java).setAction("show"))
+            invoke.resolve(JSObject().put("shown",shown))
+        }catch(e: Exception){invoke.reject(e.message ?: "Menu WOLF indisponible.")}
+    }
     @Command fun openWolf(invoke: Invoke) {
         try {
             val root=checkedRoot(invoke.parseArgs(FolderArgs::class.java).token)
             require(WolfStorage.detected(root)) { "Ce jeu n’utilise pas WOLF." }
-            require(!WolfOverlayService.running) { "Le menu WOLF est déjà ouvert. Utilisez le bouton flottant ou sa notification." }
-            WolfSession.root=root
+            require(!WolfOverlayService.running || WolfSession.root?.let { identity(it)==identity(root) }==true) { "Arrêtez le menu WOLF actuel avant d’ouvrir un autre jeu." }
+            if(!WolfOverlayService.running)WolfSession.root=root
             if(!android.provider.Settings.canDrawOverlays(activity)) {
                 WolfSession.awaitingPermission=true
                 activity.startActivity(Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,Uri.parse("package:${activity.packageName}")))
                 invoke.resolve(JSObject().put("permission",true))
-            } else { (activity as? MainActivity)?.requestWolfNotifications();activity.startForegroundService(Intent(activity,WolfOverlayService::class.java));invoke.resolve(JSObject().put("started",true)) }
+            } else { (activity as? MainActivity)?.requestWolfNotifications();activity.startForegroundService(Intent(activity,WolfOverlayService::class.java).setAction("show"));invoke.resolve(JSObject().put("started",true)) }
         }catch(e: Exception){invoke.reject(e.message ?: "Menu WOLF indisponible.")}
     }
     @Command fun applyFolder(invoke: Invoke) {

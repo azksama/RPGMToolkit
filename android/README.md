@@ -1,4 +1,4 @@
-# RPGM Toolkit Android — 1.9.2
+# RPGM Toolkit Android — 1.9.3
 
 Application Android Rust + Tauri 2, interface React/TypeScript, accès aux fichiers par un plugin Kotlin Storage Access Framework. Les modules MV/MZ `RPGMToolkit.js` et XP/VX/VX Ace `RPGMToolkit.rb` sont embarqués dans la bibliothèque Rust.
 
@@ -76,4 +76,4 @@ La sélection de dossiers accepte une bibliothèque contenant plusieurs jeux et 
 
 ## WOLF / Winlator
 
-Voir [le guide WOLF](../wolf/README.md). Le dossier doit être partagé avec Winlator. Après installation, **Ouvrir l’éditeur** lance le menu Android flottant ; autoriser l’affichage par-dessus les applications. Les profils définissent les objets, HP et stats propres au jeu. Les archives WOLF protégées restent refusées.
+Voir [le guide WOLF](../wolf/README.md). Le dossier doit être partagé avec Winlator. Après installation, **Toolbox** lance le menu Android flottant ; autoriser l’affichage par-dessus les applications. Les profils définissent les objets, HP et stats propres au jeu. Les archives WOLF protégées restent refusées.

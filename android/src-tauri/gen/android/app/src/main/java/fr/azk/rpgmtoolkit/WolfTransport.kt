@@ -4,7 +4,7 @@ import androidx.documentfile.provider.DocumentFile
 import org.json.JSONArray
 import org.json.JSONObject
 
-class WolfTransport(private val storage: WolfStorage, private val folder: DocumentFile, private val catalog: JSONArray) {
+class WolfTransport(private val storage: WolfStorage, private val folder: DocumentFile, private val textFields: BooleanArray) {
     private var counter = 1
     private var pending = 0
     private var pendingOperations: JSONArray? = null
@@ -41,8 +41,8 @@ class WolfTransport(private val storage: WolfStorage, private val folder: Docume
             require(op.keys().asSequence().all { it in setOf("index","action","value") })
             if(index==-1)require(action in setOf(0,5,6,7,8,9)) { "Commande WOLF invalide." }
             else {
-                require(index in 0 until catalog.length() && action in 0..4) { "Champ WOLF invalide." }
-                val string=catalog.getJSONObject(index).getBoolean("string")
+                require(index in textFields.indices && action in 0..4) { "Champ WOLF invalide." }
+                val string=textFields[index]
                 require(!(action==1 && string) && !(action==2 && !string)) { "Type WOLF incorrect." }
             }
             if(action==2)require(op.getString("value").length<=10000 && !op.getString("value").contains('\u0000')) { "Texte trop long ou invalide." }

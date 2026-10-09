@@ -22,7 +22,7 @@ test('WOLF large catalogue: paged editing, profile beyond 20k and native reads l
    const catalog=Array.from({length:100000},(_,i)=>({reference:1100000000+Math.floor(i/10)*100+i%10,name:'row-'+Math.floor(i/10)+' / '+i%10,string:i%2===1,group:'Database',alias:null}));
    localStorage.setItem('wolf-profile-v1:large',JSON.stringify({format:'wolf-toolkit-profile-v1',project:'large',pollMs:2000,entries:catalog.filter(e=>!e.string).slice(0,20001).map(e=>({reference:e.reference,role:'variable',label:'',team:'ally',target:'',maximum:0,icon:null}))}));
    window.wolfValues={};window.wolfLocks={};window.wolfCalls=[];
-   window.WolfNative={bootstrap:()=>JSON.stringify({catalog,project:'large',title:'Large WOLF',version:'1.9.2'}),request:(id,text)=>{
+   window.WolfNative={bootstrap:()=>JSON.stringify({catalog,project:'large',title:'Large WOLF',version:'1.9.3'}),request:(id,text)=>{
     const ops=JSON.parse(text);wolfCalls.push(ops);
     setTimeout(()=>ToolkitHost.answer({id,result:{results:ops.map(op=>{
      if(op.action===1||op.action===2)wolfValues[op.index]=op.value;
@@ -80,7 +80,7 @@ test('WOLF shared mobile editor: profiles, native acknowledgements, bulk actions
     if(!localStorage.getItem('wolf-profile-v1:fixture'))localStorage.setItem('wolf-profile-v1:fixture',JSON.stringify(profile));
     window.wolfValues={1:12,2:500,3:100,4:0,5:0,6:10,300:'日本語',301:30};window.wolfLocks={};window.wolfCalls=[];window.wolfClosed=0;window.wolfNoclip=false;
     window.WolfNative={
-     bootstrap:()=>JSON.stringify({catalog,project:'fixture',title:'Test WOLF',version:'1.9.2'}),
+     bootstrap:()=>JSON.stringify({catalog,project:'fixture',title:'Test WOLF',version:'1.9.3'}),
      request:(id,text)=>{
       const ops=JSON.parse(text);wolfCalls.push(ops);
       if(window.wolfOffline){setTimeout(()=>ToolkitHost.answer({id,error:'Offline fixture'}),10);return;}

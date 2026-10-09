@@ -1,6 +1,6 @@
 {
   "name": "rpgm-toolkit",
-  "version": "1.9.2",
+  "version": "1.9.3",
   "private": true,
   "scripts": {
     "build:mod": "node plugin/build.cjs",

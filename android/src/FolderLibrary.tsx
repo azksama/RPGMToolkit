@@ -37,7 +37,7 @@ export function FolderLibrary({state,busy,run,onComplete,onOpenWolf}:{state:Stat
   <ul className="library-list" aria-label="Jeux trouvés">
    {shown.map(g=><li key={g.token} className={g.error?'library-error':''}>
     <label><input type="checkbox" checked={selected.has(g.token)} disabled={busy||!eligible(g)} onChange={()=>toggle(g.token)} aria-label={'Sélectionner '+g.title}/><span><strong>{g.title}</strong><small>{g.path}</small><span className="library-state">{g.game?.engine&&<b>{g.game.engine}</b>}{plans[g.plan]}{g.result&&<span> · {results[g.result]}</span>}</span>{g.error&&<small className="library-reason">{g.error}</small>}</span></label>
-    <div>{g.game?.engine==='WOLF'&&g.plan==='current'&&<button disabled={busy} onClick={()=>onOpenWolf(g.token)}>Ouvrir l’éditeur</button>}{g.game?.recoveryNeeded&&<button disabled={busy} onClick={()=>run('recover_folder',{token:g.token})}>Restaurer</button>}<button aria-label={'Retirer '+g.title+' de la liste'} disabled={busy} onClick={()=>run('remove_folder',{token:g.token})}><X size={17}/></button></div>
+    <div>{g.game?.engine==='WOLF'&&g.plan==='current'&&<button disabled={busy} onClick={()=>onOpenWolf(g.token)}>Toolbox</button>}{g.game?.recoveryNeeded&&<button disabled={busy} onClick={()=>run('recover_folder',{token:g.token})}>Restaurer</button>}<button aria-label={'Retirer '+g.title+' de la liste'} disabled={busy} onClick={()=>run('remove_folder',{token:g.token})}><X size={17}/></button></div>
    </li>)}
   </ul>
   {!shown.length&&<p className="library-empty">{query?'Aucun résultat.':'Aucun jeu détecté.'}</p>}

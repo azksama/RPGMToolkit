@@ -18,7 +18,7 @@ class MainActivity : TauriActivity() {
     if (WolfSession.awaitingPermission && android.provider.Settings.canDrawOverlays(this) && WolfSession.root != null) {
       WolfSession.awaitingPermission=false
       requestWolfNotifications()
-      startForegroundService(android.content.Intent(this,WolfOverlayService::class.java))
+      startForegroundService(android.content.Intent(this,WolfOverlayService::class.java).setAction("show"))
     }
   }
   override fun onCreate(savedInstanceState: Bundle?) {

@@ -1,3 +1,18 @@
+# Validation 1.9.3
+
+Vérifications du 9 octobre 2026.
+
+- Refus de réouverture reproduit dans la 1.9.2. Le test du nouveau parcours a également reproduit une exception mémoire dans `inspectFolder` sur un catalogue WOLF de 200 032 champs, alors que le service flottant était actif.
+- Réouverture via une commande native légère, limitée au même dossier déjà validé. Le premier lancement conserve la vérification du mod installé. Le service conserve un tableau de types, sans garder les objets JSON du catalogue pour le transport.
+- 29 tests Rust de l’installateur, dont quatre régressions du lancement WOLF ; 48 tests JavaScript, deux parcours WOLF Chromium, un parcours de bibliothèque sur quatre formats d’écran et 11 tests Kotlin réussis.
+- Un nouveau test instrumenté sur l’émulateur Android Studio API 36.1 vérifie les indices 200 030/200 031, les types numériques/textuels, les échanges Unicode et le refus des écritures invalides avant création des commandes. Les réponses du jeu sont simulées pour ce test de transport.
+- APK release R8 vérifié sur la fixture de 200 032 champs : ouverture directe, autorisation de superposition Android, fermeture et réouverture avec bouton masqué, actualisation de la bibliothèque, ouverture depuis la notification sur l’écran d’accueil, recherche du dernier champ et bouton flottant hors de l’installateur. Le parcours final ne contient ni exception fatale ni exception mémoire dans Logcat.
+- APK ARM64, ARMv7 et x86_64 signé avec le certificat existant ; alignements ZIP et ELF de 16 Ko vérifiés, modules et ressources comparés aux sources.
+
+Aucun test sur téléphone physique ni dans Winlator réel n’est revendiqué. Les essais Android utilisent des fixtures ; la validation WOLF Windows des versions précédentes reste distincte.
+
+---
+
 # Validation 1.9.2
 
 Vérifications du 9 octobre 2026.

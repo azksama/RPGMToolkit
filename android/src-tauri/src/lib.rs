@@ -184,11 +184,14 @@ async fn recover_game(app:AppHandle,request_id:String)->Result<Value,String>{job
 }).await}
 #[tauri::command]
 async fn open_wolf(app:AppHandle,token:String)->Result<Value,String>{
-    tauri::async_runtime::spawn_blocking(move||{
-        let checked=folder_snapshot(&native(&app,"inspectFolder",json!({"token":token}))?)?;
-        if !wolf::is_wolf(&checked.info.engine)||checked.info.status!="installed"||checked.info.recovery_needed||checked.previous_mod.as_deref()!=Some(wolf::CODE){return Err("Installez la version embarquée du mod WOLF avant d’ouvrir le menu.".into())}
-        native(&app,"openWolf",json!({"token":token}))
-    }).await.map_err(|e|e.to_string())?
+    tauri::async_runtime::spawn_blocking(move||open_wolf_session(&token,|command,data|native(&app,command,data))).await.map_err(|e|e.to_string())?
+}
+fn open_wolf_session(token:&str,mut command:impl FnMut(&str,Value)->Result<Value,String>)->Result<Value,String>{
+    let shown=command("showWolf",json!({"token":token}))?;
+    if shown["shown"].as_bool().ok_or("État du menu WOLF invalide.")? {return Ok(shown)}
+    let checked=folder_snapshot(&command("inspectFolder",json!({"token":token}))?)?;
+    if !wolf::is_wolf(&checked.info.engine)||checked.info.status!="installed"||checked.info.recovery_needed||checked.previous_mod.as_deref()!=Some(wolf::CODE){return Err("Installez la version embarquée du mod WOLF avant d’ouvrir le menu.".into())}
+    command("openWolf",json!({"token":token}))
 }
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -197,4 +200,61 @@ pub fn run() {
     let builder=builder.plugin(tauri::plugin::Builder::<tauri::Wry>::new("storage").setup(|app,api|{app.manage(Storage(api.register_android_plugin("fr.azk.rpgmtoolkit","StoragePlugin")?));Ok(())}).build());
     builder.invoke_handler(tauri::generate_handler![get_state,select_game,select_mod,reset_mod,apply_mod,export_result,recover_game,scan_folders,refresh_folders,remove_folder,apply_folders,recover_folder,open_wolf])
         .run(tauri::generate_context!()).expect("Unable to start RPGM Toolkit");
+}
+
+#[cfg(test)]
+mod wolf_launcher_tests {
+    use super::*;
+
+    #[test]
+    fn reopening_does_not_read_or_copy_the_game_registry() {
+        let mut calls=Vec::new();
+        let result=open_wolf_session("same-game",|command,data| {
+            calls.push(command.to_owned());
+            assert_eq!(data,json!({"token":"same-game"}));
+            assert_eq!(command,"showWolf","An active overlay must not reload its catalogue");
+            Ok(json!({"shown":true}))
+        }).unwrap();
+        assert_eq!(calls,["showWolf"]);
+        assert_eq!(result,json!({"shown":true}));
+    }
+
+    #[test]
+    fn another_active_game_is_refused_before_inspection() {
+        let mut calls=0;
+        let result=open_wolf_session("other-game",|command,_| {
+            calls+=1;
+            assert_eq!(command,"showWolf");
+            Err("Another game is active".into())
+        });
+        assert_eq!(calls,1);
+        assert_eq!(result.unwrap_err(),"Another game is active");
+    }
+
+    #[test]
+    fn an_initial_launch_still_checks_the_installed_mod() {
+        let mut calls=Vec::new();
+        let result=open_wolf_session("unchecked-game",|command,_| {
+            calls.push(command.to_owned());
+            match command {
+                "showWolf"=>Ok(json!({"shown":false})),
+                "inspectFolder"=>Ok(json!({"engine":"MV","registry":"var $plugins = [];"})),
+                _=>panic!("An unchecked game must not start the overlay"),
+            }
+        });
+        assert_eq!(calls,["showWolf","inspectFolder"]);
+        assert!(result.unwrap_err().contains("Installez"));
+    }
+
+    #[test]
+    fn an_invalid_native_reply_does_not_bypass_validation() {
+        let mut calls=0;
+        let result=open_wolf_session("game",|command,_| {
+            calls+=1;
+            assert_eq!(command,"showWolf");
+            Ok(json!({"shown":"true"}))
+        });
+        assert_eq!(calls,1);
+        assert!(result.unwrap_err().contains("invalide"));
+    }
 }
