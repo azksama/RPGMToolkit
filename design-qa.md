@@ -2,6 +2,8 @@
 
 final result: passed
 
+Ce résultat concerne le rendu et les interactions de l’interface. La distribution stable reste bloquée par une alerte Play Protect, documentée dans le [rapport de mise à jour](docs/validation/1.10.0-updater.md).
+
 ## Référence et captures
 
 - Référence visuelle : `../../.codex-attachments/44cc7270-6d4e-4216-862b-827ecd366c8b/4c55bbcb-7602-49bb-9984-7b1914b275db/1000458322.jpg` (1280 × 960 px). Direction visuelle fournie : application claire, cartes arrondies et navigation sombre. Le calendrier et les graphiques ne font pas partie du produit.

@@ -1,6 +1,8 @@
 # Versions
 
-## 1.10.0 — Installateur, compatibilité et mises à jour
+## 1.10.0 — Préversion : installateur, compatibilité et mises à jour
+
+Distribution stable suspendue après une alerte Play Protect sur l’émulateur. Voir le [contrôle de l’updater](docs/validation/1.10.0-updater.md).
 
 - Nouvelle interface mobile claire : cartes arrondies, navigation Jeux / Activité / Réglages, bibliothèque prioritaire après import et nouvelle icône.
 - Recherche et téléchargement automatiques des APK depuis les releases publiques GitHub, avec contrôle SHA-256 et certificat. Confirmation d’installation par Android.

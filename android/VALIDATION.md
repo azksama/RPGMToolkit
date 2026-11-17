@@ -2,6 +2,8 @@
 
 Vérifications du 17 novembre 2026.
 
+**Contrôle après publication :** téléchargement automatique et conservation de l’historique vérifiés, mais installation standard bloquée par Play Protect. La version est en préversion. Voir le [rapport de mise à jour](../docs/validation/1.10.0-updater.md).
+
 - Nouvelle interface et nouvelle icône contrôlées dans l’APK sur Android Emulator, avec ADB/UI Automator, en portrait 720 × 1280 et paysage 1280 × 720. Captures et comparaison avec la référence dans [design-qa.md](../design-qa.md).
 - 63 tests JavaScript du mod, 33 cas Rust de l’installateur, 24 assertions de l’installateur PowerShell, 10 tests Rust WOLF et deux tests de l’hôte WOLF réussis.
 - 12 tests d’instrumentation Android réussis : grands registres, échanges WOLF, sérialisation, restauration, validation des releases et refus des APK altérés, index SAF et invalidation après modification.
