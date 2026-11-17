@@ -19,6 +19,18 @@ import app.tauri.plugin.JSObject
 internal object RegistryTransfer {
     const val LIMIT = 256L * 1024 * 1024
 
+    fun attachText(result: JSObject, registry: String, cache: File): JSObject {
+        if (registry.length <= 1024 * 1024) return result.put("registry", registry)
+        require(cache.isDirectory || cache.mkdirs()) { "Cache indisponible." }
+        val file = File(cache, "registry-${UUID.randomUUID()}.json")
+        require(file.createNewFile()) { "Création du transfert impossible." }
+        try {
+            file.bufferedWriter(Charsets.UTF_8).use { it.write(registry) }
+            require(file.length() <= LIMIT) { "Registre trop volumineux." }
+            return result.put("registryPath", file.name)
+        } catch (error: Exception) { file.delete(); throw error }
+    }
+
     fun load(args: ApplyArgs, cache: File) {
         if (args.registryPath.isEmpty()) return
         require(args.registry.isEmpty()) { "Transfert du registre ambigu." }

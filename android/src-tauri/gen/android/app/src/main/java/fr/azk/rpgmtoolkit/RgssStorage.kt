@@ -100,6 +100,7 @@ class RgssStorage(private val activity: Activity) {
         val journal = JSONObject().put("backup", id).put("stateHash", hash(state)).put("target", target)
             .put("scriptHash", oldScripts?.let { hash(it) } ?: JSONObject.NULL).put("originalHash", oldOriginal?.let { hash(it) } ?: JSONObject.NULL)
         write(backup, "manifest.json", journal.toString().toByteArray(Charsets.UTF_8))
+        DocumentQueries.refresh()
         require(fingerprint(current(root).toString()) == args.expected) { "Le jeu a changé pendant la sauvegarde." }
         write(root, MARKER, journal.toString().toByteArray(Charsets.UTF_8))
         try {
@@ -107,6 +108,7 @@ class RgssStorage(private val activity: Activity) {
             if (!args.uninstall) { write(own, "original-game.ini", original); write(own, target, newScripts) }
             write(root, "Game.ini", newIni)
             if (args.uninstall) { remove(own, target); remove(own, "original-game.ini"); if (own.listFiles().isEmpty()) require(own.delete()) }
+            DocumentQueries.refresh()
             val checked = current(root)
             require(checked.getString("ini") == patched.getString("ini")) { "Game.ini installé incorrect." }
             if (!args.uninstall) require(checked.getString("scripts") == patched.getString("scripts")) { "Scripts installés incorrects." }

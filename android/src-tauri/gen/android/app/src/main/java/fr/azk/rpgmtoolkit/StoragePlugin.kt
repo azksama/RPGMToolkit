@@ -26,10 +26,26 @@ import android.provider.DocumentsContract
 @InvokeArg class PickArgs { var kind: String = "zip" }
 @InvokeArg class ApplyArgs { var token: String = ""; var registry: String = ""; var registryPath: String = ""; var plugin: String? = null; var expected: String = ""; var uninstall: Boolean = false }
 @InvokeArg class FolderArgs { var token: String = "" }
+@InvokeArg class UpdateArgs { var action: String = "status"; var automatic: Boolean? = null; var wifiOnly: Boolean? = null }
 @InvokeArg class ExportArgs { var path: String = ""; var name: String = "game-toolkit.zip" }
 
 @TauriPlugin
 class StoragePlugin(private val activity: Activity) : Plugin(activity) {
+    @Command fun updateApp(invoke: Invoke) {
+        val args = invoke.parseArgs(UpdateArgs::class.java)
+        background(invoke) {
+            when (args.action) {
+                "status" -> Unit
+                "configure" -> AppUpdater.schedule(activity, args.automatic, args.wifiOnly)
+                "check" -> AppUpdater.request(activity, false)
+                "download" -> AppUpdater.request(activity, true)
+                "install" -> AppUpdater.install(activity)
+                else -> error("Action de mise à jour inconnue.")
+            }
+            if (args.action == "download" || args.action == "configure" && args.automatic == true) activity.runOnUiThread { (activity as? MainActivity)?.requestWolfNotifications() }
+            AppUpdater.status(activity)
+        }
+    }
     private val rgss = RgssStorage(activity)
     private val wolf = WolfStorage(activity)
     private val io = Executors.newSingleThreadExecutor()
@@ -43,9 +59,9 @@ class StoragePlugin(private val activity: Activity) : Plugin(activity) {
     private val markerName = ".rpgm-toolkit-pending.json"
 
     private fun background(invoke: Invoke, action: () -> JSObject) {
-        io.execute { try { invoke.resolve(action()) } catch (e: Exception) { invoke.reject(e.message ?: "Accès aux fichiers impossible.") } }
+        io.execute { try { invoke.resolve(DocumentQueries.scoped(activity, action = action)) } catch (e: Exception) { invoke.reject(e.message ?: "Accès aux fichiers impossible.") } }
     }
-    private fun bytes(file: DocumentFile, limit: Long = maxText): ByteArray {
+    private fun bytes(file: DocumentFile, limit: Long = if (file.name.equals("plugins.js", true)) 64L * 1024 * 1024 else maxText): ByteArray {
         require(file.length() <= limit) { "${file.name} dépasse la taille autorisée." }
         return activity.contentResolver.openInputStream(file.uri)?.use { stream ->
             val out = java.io.ByteArrayOutputStream()
@@ -85,16 +101,7 @@ class StoragePlugin(private val activity: Activity) : Plugin(activity) {
     }
     private fun entries(parent: DocumentFile): List<ScanEntry<DocumentFile>> {
         require(parent.canRead()) { "Lecture refusée." }
-        val projection = arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME, DocumentsContract.Document.COLUMN_MIME_TYPE)
-        val uri = DocumentsContract.buildChildDocumentsUriUsingTree(parent.uri, DocumentsContract.getDocumentId(parent.uri))
-        val metadata = mutableMapOf<String, Pair<String, Boolean>>()
-        (activity.contentResolver.query(uri, projection, null, null, null) ?: error("Lecture du dossier impossible.")).use { cursor ->
-            while (cursor.moveToNext()) {
-                require(metadata.size < 100000) { "Trop d’entrées dans ce dossier." }
-                metadata[cursor.getString(0)] = Pair(cursor.getString(1) ?: "", cursor.getString(2) == DocumentsContract.Document.MIME_TYPE_DIR)
-            }
-        }
-        return parent.listFiles().mapNotNull { file -> metadata[DocumentsContract.getDocumentId(file.uri)]?.let { ScanEntry(file, it.first, it.second) } }
+        return parent.listFiles().map { ScanEntry(it, it.name ?: "", it.isDirectory) }
     }
     private fun scan(root: DocumentFile): JSObject {
         val scanner = GameScanner<DocumentFile>(
@@ -132,7 +139,6 @@ class StoragePlugin(private val activity: Activity) : Plugin(activity) {
             require(plugins.isDirectory && plugins.canWrite()) { "Dossier js/plugins inaccessible." }
             plugins.toolkitChild("RPGMToolkit.js")?.let { require(it.isFile && it.canWrite()) { "RPGMToolkit.js est en lecture seule." } }
         }
-        require(root.toolkitChild("index.html")?.isFile == true) { "Fichier requis absent : index.html" }
         val system = root.toolkitChild("data")?.toolkitChild("System.json") ?: error("Fichier requis absent : data/System.json")
         JSONObject(text(system).removePrefix("\uFEFF"))
         return if (mz != null) "MZ" else "MV"
@@ -158,10 +164,11 @@ class StoragePlugin(private val activity: Activity) : Plugin(activity) {
         val registry = if (recovery != null) text(recovery.first.toolkitChild("plugins.js") ?: error("Copie de secours absente.")) else text(js.toolkitChild("plugins.js") ?: error("plugins.js absent."))
         val plugin = if (recovery != null) recovery.first.toolkitChild("RPGMToolkit.js")?.let { text(it) } else js.toolkitChild("plugins")?.toolkitChild("RPGMToolkit.js")?.let { text(it) }
         val title = try { root.toolkitChild("data")?.toolkitChild("System.json")?.let { JSONObject(text(it).removePrefix("\uFEFF")).optString("gameTitle") } } catch (_: Exception) { null }
-        return JSObject().put("kind", "folder").put("registry", registry).put("plugin", plugin ?: JSONObject.NULL)
+        val result = JSObject().put("kind", "folder").put("plugin", plugin ?: JSONObject.NULL)
             .put("title", title?.takeIf { it.isNotBlank() } ?: root.name ?: "Jeu RPG Maker")
             .put("engine", detectedEngine)
             .put("name", root.name ?: "Jeu").put("recoveryNeeded", recovery != null)
+        return RegistryTransfer.attachText(result, registry, cache)
     }
     @Command fun pick(invoke: Invoke) {
         try {
@@ -185,7 +192,7 @@ class StoragePlugin(private val activity: Activity) : Plugin(activity) {
             if (kind == "folder") {
                 val flags = result.data!!.flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
                 try { activity.contentResolver.takePersistableUriPermission(uri, flags) } catch (_: SecurityException) { /* Session grant still works. */ }
-                val root = DocumentFile.fromTreeUri(activity, uri) ?: error("Ce dossier n’est pas accessible.")
+                val root = DocumentQueries.wrap(activity, DocumentFile.fromTreeUri(activity, uri) ?: error("Ce dossier n’est pas accessible."))
                 require(root.canRead()) { "Accordez l’accès en lecture à ce dossier." }
                 scan(root)
             } else {
@@ -264,6 +271,7 @@ class StoragePlugin(private val activity: Activity) : Plugin(activity) {
             if (oldPlugin != null) write(backup, "RPGMToolkit.js", oldPlugin)
             val journal = JSONObject().put("backup", backupId).put("hadPlugin", oldPlugin != null).put("registrySha256", hash(oldRegistry)).put("pluginSha256", oldPlugin?.let { hash(it) } ?: JSONObject.NULL).put("action", if (args.uninstall) "uninstall" else "install")
             write(backup, "manifest.json", journal.toString(2))
+            DocumentQueries.refresh()
             require(fingerprint(text(registryFile), pluginDir.toolkitChild("RPGMToolkit.js")?.let { text(it) }) == args.expected) { "Les fichiers du jeu ont changé pendant la sauvegarde." }
             val marker = write(root, markerName, journal.toString())
             try {
@@ -275,6 +283,7 @@ class StoragePlugin(private val activity: Activity) : Plugin(activity) {
                 try { restore(root); } catch (rollback: Exception) { error("${e.message} Restauration incomplète : ${rollback.message}. Rouvrez ce dossier pour restaurer la copie de secours.") }
                 error("${e.message} Les fichiers précédents ont été restaurés.")
             }
+            DocumentQueries.refresh()
             inspect(root).put("backup", ".rpgm-toolkit-backups/$backupId")
         }
     }

@@ -47,7 +47,6 @@ fn folder_snapshot(v:&Value)->Result<Snapshot,String> {
     let registry = v["registry"].as_str().ok_or("Liste de plugins absente.")?;
     if wolf::is_wolf(&info.engine) { return wolf::inspect(registry.into(),info); }
     if rgss::legacy(&info.engine) { return rgss::inspect(registry.into(),info); }
-    engine::patch_registry(registry, false)?;
     engine::inspect_text(v["registry"].as_str().ok_or("Liste de plugins absente.")?.into(),v["plugin"].as_str().map(str::to_string),info)
 }
 fn progress(app:&AppHandle, stage:&str, percent:u32){let _=app.emit("operation-progress",json!({"stage":stage,"percent":percent}));}
@@ -63,6 +62,10 @@ async fn job(app:AppHandle, request_id:String, operation:impl FnOnce(&AppHandle,
     }).await.map_err(|e|e.to_string())?
 }
 fn clear_result(s:&mut Session){if let Some(p)=s.result.take(){let _=std::fs::remove_file(p);}s.result_name.clear();}
+#[tauri::command]
+async fn app_update(app: AppHandle, action: String, automatic: Option<bool>, wifi_only: Option<bool>) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || native(&app, "updateApp", json!({"action":action,"automatic":automatic,"wifiOnly":wifi_only}))).await.map_err(|e|e.to_string())?
+}
 #[tauri::command]
 fn get_state(app:AppHandle)->Result<Value,String>{let state=app.state::<AppState>();let s=state.session.try_lock().map_err(|_|"Opération en cours.")?;Ok(view(&s))}
 #[tauri::command]
@@ -198,7 +201,7 @@ pub fn run() {
     let builder=tauri::Builder::default().manage(AppState::default());
     #[cfg(target_os="android")]
     let builder=builder.plugin(tauri::plugin::Builder::<tauri::Wry>::new("storage").setup(|app,api|{app.manage(Storage(api.register_android_plugin("fr.azk.rpgmtoolkit","StoragePlugin")?));Ok(())}).build());
-    builder.invoke_handler(tauri::generate_handler![get_state,select_game,select_mod,reset_mod,apply_mod,export_result,recover_game,scan_folders,refresh_folders,remove_folder,apply_folders,recover_folder,open_wolf])
+    builder.invoke_handler(tauri::generate_handler![app_update,get_state,select_game,select_mod,reset_mod,apply_mod,export_result,recover_game,scan_folders,refresh_folders,remove_folder,apply_folders,recover_folder,open_wolf])
         .run(tauri::generate_context!()).expect("Unable to start RPGM Toolkit");
 }
 

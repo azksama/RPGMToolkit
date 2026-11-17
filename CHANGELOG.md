@@ -1,5 +1,15 @@
 # Versions
 
+## 1.10.0 — Installateur, compatibilité et mises à jour
+
+- Nouvelle interface mobile claire : cartes arrondies, navigation Jeux / Activité / Réglages, bibliothèque prioritaire après import et nouvelle icône.
+- Recherche et téléchargement automatiques des APK depuis les releases publiques GitHub, avec contrôle SHA-256 et certificat. Confirmation d’installation par Android.
+- Lecture des identifiants de scripts RGSS encodés en grands entiers Marshal, sans exécution de code.
+- `plugins.js` jusqu’à 64 Mio, avec transfert des gros registres hors du pont JSON Android.
+- Installation dans les dossiers MV/MZ complets sans `index.html`, y compris les racines imbriquées dans `Data/`.
+- Métadonnées SAF regroupées et mises en cache pendant chaque opération, analyse JSON accélérée et suppression d’une double lecture du registre Rust.
+- Sauvegardes, contrôles avant écriture, restauration et conservation des autres plugins maintenus.
+
 ## 1.9.4 — Stabilité des changements de carte
 
 - Correction du plantage MZ `Cannot read properties of undefined (reading 'isClosing')` après un changement de carte.

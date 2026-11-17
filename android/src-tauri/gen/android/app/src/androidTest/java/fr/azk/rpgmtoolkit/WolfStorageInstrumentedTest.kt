@@ -72,7 +72,7 @@ class WolfStorageInstrumentedTest {
             for ((key, file) in mapOf("common" to "CommonEvent.dat", "system" to "SysDatabase.dat", "mutable" to "CDataBase.dat", "game" to "Game.dat")) {
                 storage.write(basic, file, Base64.decode(original.getString(key), Base64.NO_WRAP))
             }
-            test(root, original)
+            DocumentQueries.scoped(context) { test(DocumentQueries.wrap(context, root), original) }
         } finally {
             assertEquals(name, root.name)
             assertTrue(root.delete())

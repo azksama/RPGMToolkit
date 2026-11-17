@@ -17,6 +17,8 @@ class GameScanner<T>(
         val seen = mutableSetOf<String>()
         val games = mutableListOf<ScanCandidate<T>>()
         val warnings = mutableListOf<String>()
+        val listings = mutableMapOf<String, List<ScanEntry<T>>>()
+        fun read(node: T) = listings.getOrPut(identity(node)) { children(node) }
         val ignored = setOf(".rpgm-toolkit-backups", ".git", "node_modules")
         val assets = setOf("js", "data", "img", "audio", "movies", "fonts", "save", "saves")
         queue.add(Pending(root, name, 0))
@@ -29,12 +31,12 @@ class GameScanner<T>(
             if (!seen.add(identity(next.node))) continue
             progress(seen.size)
             try {
-                val entries = children(next.node)
+                val entries = read(next.node)
                 val js = entries.firstOrNull { it.directory && it.name.equals("js", true) }
-                val names = js?.let { children(it.node).filter { child -> !child.directory }.map { child -> child.name.lowercase(java.util.Locale.ROOT) }.toSet() } ?: emptySet()
+                val names = js?.let { read(it.node).filter { child -> !child.directory }.map { child -> child.name.lowercase(java.util.Locale.ROOT) }.toSet() } ?: emptySet()
                 val candidate = names.any { it in setOf("rpg_core.js", "rmmz_core.js", "plugins.js") }
-                val data = if(candidate) null else entries.firstOrNull { it.directory && it.name.equals("Data",true) }?.let { children(it.node) }
-                val basic = data?.firstOrNull { it.directory && it.name.equals("BasicData",true) }?.let { children(it.node) }
+                val data = if(candidate) null else entries.firstOrNull { it.directory && it.name.equals("Data",true) }?.let { read(it.node) }
+                val basic = data?.firstOrNull { it.directory && it.name.equals("BasicData",true) }?.let { read(it.node) }
                 val wolf = !candidate && (entries.any { !it.directory && it.name.lowercase() in setOf("data.wolf","data.wolfx",".rpgm-toolkit-wolf-pending.json") } || data?.any { it.name.lowercase() in setOf("basicdata.wolf","basicdata.wolfx") }==true || basic?.any { it.name.equals("CommonEvent.dat",true) }==true)
                 val legacy = !candidate && !wolf && entries.any { !it.directory && (it.name.endsWith(".rgss3a", true) || it.name.endsWith(".rgss2a", true) || it.name.endsWith(".rgssad", true) || it.name.equals("RPG_RT.ldb", true) || it.name.equals("Game.ini", true)) }
                 if (candidate || legacy || wolf) games.add(ScanCandidate(next.node, next.path, legacy, wolf))

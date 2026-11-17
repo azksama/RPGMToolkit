@@ -1,6 +1,8 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Base application theme. -->
-    <style name="Theme.rpgm_installer" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <!-- Customize your theme here. -->
+    <style name="Theme.rpgm_installer" parent="Theme.MaterialComponents.Light.NoActionBar">
+        <item name="android:windowBackground">#f1f2f4</item>
+        <item name="android:colorAccent">#596688</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
     </style>
 </resources>

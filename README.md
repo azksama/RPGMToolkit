@@ -1,10 +1,12 @@
 # RPGM Toolkit
 
-Mod intégré pour RPG Maker XP, VX, VX Ace, MV et MZ, éditeur WOLF pour Winlator et installateur Android **Rust + Tauri 2**, version **1.9.4**.
+Mod intégré pour RPG Maker XP, VX, VX Ace, MV et MZ, éditeur WOLF pour Winlator et installateur Android **Rust + Tauri 2**, version **1.10.0**.
 
 Le [guide WOLF](wolf/README.md) décrit le menu flottant, les profils d’objets/HP/stats et les formats pris en charge. Les dossiers RPG Maker peuvent contenir directement `js/` et `data/`, sans `www/`, ou se trouver dans des sous-dossiers comme `Data/`.
 
 Recherche et édition de variables, alias anglais pour l’affichage, recherche et ajout d’objets, armes et armures. L’application Android détecte un jeu fourni en ZIP ou en dossier, installe le mod embarqué, permet sa mise à jour et sa désinstallation, avec sauvegardes et restauration.
+
+La 1.10 ajoute le nouvel installateur mobile, une icône dédiée et les mises à jour automatiques via les [releases publiques](https://github.com/azksama/RPGMToolkit/releases/latest). Les modifications des jeux restent locales.
 
 ## Organisation
 
@@ -40,7 +42,7 @@ La compilation de l’APK est décrite dans [android/README.md](android/README.m
 
 Voir [le guide du mod](plugin/LIRE-MOI.md), [le guide Android](android/README.md), [le correctif 1.0.1](plugin/CORRECTIF-1.0.1.md) et [le rapport de validation](android/VALIDATION.md).
 
-Après une mise à jour de l’APK, sélectionner **Mod inclus**, puis le jeu et **Réinstaller / mettre à jour** pour actualiser le mod déjà installé. Fermer le jeu avant toute modification.
+Après une mise à jour de l’APK, sélectionner le mod embarqué dans **Réglages**, puis les jeux et **Réinstaller / mettre à jour** pour actualiser le mod déjà installé. Fermer le jeu avant toute modification.
 
 Les essais du chargement MV/MZ utilisent des fixtures ; l’installation Android a été vérifiée sur émulateur. La validation dans chaque jeu réel et dans JoiPlay reste distincte.
 

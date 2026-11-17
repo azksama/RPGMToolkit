@@ -69,6 +69,7 @@ rust {
 }
 
 dependencies {
+    implementation("androidx.work:work-runtime:2.10.1")
     implementation("androidx.documentfile:documentfile:1.1.0")
     implementation("androidx.webkit:webkit:1.14.0")
     implementation("androidx.appcompat:appcompat:1.7.1")

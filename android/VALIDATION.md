@@ -1,3 +1,20 @@
+# Validation 1.10.0
+
+Vérifications du 17 novembre 2026.
+
+- Nouvelle interface et nouvelle icône contrôlées dans l’APK sur Android Emulator, avec ADB/UI Automator, en portrait 720 × 1280 et paysage 1280 × 720. Captures et comparaison avec la référence dans [design-qa.md](../design-qa.md).
+- 63 tests JavaScript du mod, 33 cas Rust de l’installateur, 24 assertions de l’installateur PowerShell, 10 tests Rust WOLF et deux tests de l’hôte WOLF réussis.
+- 12 tests d’instrumentation Android réussis : grands registres, échanges WOLF, sérialisation, restauration, validation des releases et refus des APK altérés, index SAF et invalidation après modification.
+- Installation, répétition et désinstallation de six jeux de test via le sélecteur Android : MV avec `plugins.js` de 5 Mio, MZ sans `index.html`, racine `Jeu/Data`, XP/VX/VX Ace avec identifiants de scripts Marshal supérieurs à 2³¹ − 1. Les fixtures Ruby sont produites par `Marshal.dump`.
+- Après installation, les autres paramètres et scripts restent identiques. Après désinstallation, les sauvegardes, scripts d’origine et `Game.ini` sont conservés octet pour octet. La seconde installation de la même version ne réécrit aucun jeu et ne crée pas de sauvegarde supplémentaire.
+- Test SAF ciblé sur 60 fichiers et huit recherches : une seule requête de répertoire avec index, contre au moins 488 appels auparavant ; un relevé mesure 58 ms contre 1968 ms. Cette mesure ne représente pas le temps complet d’installation d’un jeu.
+- Les catalogues WOLF 2/3 de 200 032 champs passent l’installation, la mise à jour et la désinstallation avec le nouvel index. Le transport invalide les métadonnées à chaque attente de réponse pour voir les fichiers créés par le jeu.
+- APK release ARM64, ARMv7 et x86_64, certificat identique aux versions précédentes, alignements ZIP/ELF de 16 Ko et modules embarqués vérifiés. Aucun fichier de test ni secret de signature dans l’APK ou les sources distribuées.
+
+Les essais utilisent des fixtures sur émulateur. Les erreurs signalées ont des cas de régression, mais les jeux concernés n’ont pas été fournis et ne sont pas déclarés testés. Aucun essai sur téléphone physique, JoiPlay ou Winlator réel n’est revendiqué pour cette version. L’updater prépare le téléchargement automatiquement ; Android demande toujours la confirmation de l’installation.
+
+---
+
 # Validation 1.9.4
 
 Vérifications du 17 novembre 2026.

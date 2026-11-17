@@ -7,6 +7,7 @@ use zip::{write::SimpleFileOptions, ZipArchive, ZipWriter};
 
 pub const EMBEDDED_MOD: &str = include_str!("../resources/RPGMToolkit.js");
 pub const MAX_TEXT: u64 = 4 * 1024 * 1024;
+pub const MAX_REGISTRY: u64 = 64 * 1024 * 1024;
 const MAX_EXPANDED: u64 = 16 * 1024 * 1024 * 1024;
 const MOD_PATH: &str = "js/plugins/RPGMToolkit.js";
 
@@ -27,13 +28,18 @@ pub fn fingerprint(registry: &str, plugin: Option<&str>) -> String {
     else { sha.update([2]); } format!("{:x}",sha.finalize())
 }
 fn parse_registry(text: &str) -> Result<(String, Vec<Value>, String), String> {
-    if text.len() as u64 > MAX_TEXT { return Err("La liste de plugins dépasse 4 Mo.".into()); }
-    let re = Regex::new(r"(?s)\A(.*?\b(?:var|let|const)\s+\$plugins\s*=\s*)(\[.*\])((?:\s|;|//[^\r\n]*(?:\r?\n|\z)|/\*.*?\*/)*)\z").unwrap();
+    if text.len() as u64 > MAX_REGISTRY { return Err("La liste de plugins dépasse 64 Mio.".into()); }
+    static RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| Regex::new(r"(?s)\A(.*?\b(?:var|let|const)\s+\$plugins\s*=\s*)(\[.*\])((?:\s|;|//[^\r\n]*(?:\r?\n|\z)|/\*.*?\*/)*)\z").unwrap());
+    let re = &*RE;
     let captures = re.captures(text).ok_or("Format de plugins.js non standard. Aucun changement effectué.")?;
     literal_depth(&captures[2])?;
-    let entries: Vec<Value> = json5::from_str(&captures[2]).map_err(|e| format!("Liste de plugins illisible : {e}"))?;
+    let entries: Vec<Value> = match serde_json::from_str(&captures[2]) {
+        Ok(entries) => entries,
+        Err(_) => json5::from_str(&captures[2]).map_err(|e| format!("Liste de plugins illisible : {e}"))?,
+    };
     if entries.iter().any(|entry| entry.get("name").and_then(Value::as_str).is_none()) { return Err("Une entrée de plugins.js est invalide.".into()); }
     if entries.iter().filter(|e| e["name"].as_str().is_some_and(|n| n.eq_ignore_ascii_case("RPGMToolkit"))).count() > 1 { return Err("Plusieurs entrées RPGMToolkit existent. Corrigez le doublon avant de continuer.".into()); }
+    if entries.iter().any(|e| e["name"].as_str().is_some_and(|n| n.eq_ignore_ascii_case("RPGMToolkit") && n != "RPGMToolkit")) { return Err("Une entrée utilise une casse différente de RPGMToolkit. Renommez-la dans le gestionnaire de plugins.".into()); }
     Ok((captures[1].into(), entries, captures[3].into()))
 }
 fn literal_depth(s:&str)->Result<(),String>{
@@ -59,15 +65,15 @@ pub fn inspect_text(registry: String, previous_mod: Option<String>, mut info: In
 pub fn patch_registry(registry: &str, uninstall: bool) -> Result<String, String> {
     let (prefix, mut entries, suffix) = parse_registry(registry)?;
     let current = entries.iter().find(|e| e["name"] == "RPGMToolkit").cloned();
-    // An ambiguous casing is refused, not silently converted into two loaded plugins.
-    if entries.iter().any(|e| e["name"].as_str().is_some_and(|n| n.eq_ignore_ascii_case("RPGMToolkit") && n != "RPGMToolkit")) { return Err("Une entrée utilise une casse différente de RPGMToolkit. Renommez-la dans le gestionnaire de plugins.".into()); }
     entries.retain(|e| e["name"] != "RPGMToolkit");
     if !uninstall {
         let mut plugin = current.unwrap_or_else(|| json!({"name":"RPGMToolkit","description":"RPGM Toolkit 1.0.1","parameters":{"Hotkey":"F6","ShowButton":"true","PlaytestOnly":"false","PageSize":"60"}}));
         plugin["status"] = json!(true);
         entries.push(plugin);
     }
-    Ok(format!("{}{}{}", prefix, serde_json::to_string_pretty(&entries).map_err(|e|e.to_string())?, suffix))
+    let output = format!("{}{}{}", prefix, serde_json::to_string_pretty(&entries).map_err(|e|e.to_string())?, suffix);
+    if output.len() as u64 > MAX_REGISTRY { return Err("La liste de plugins modifiée dépasse 64 Mio.".into()); }
+    Ok(output)
 }
 pub fn patch_snapshot(snapshot:&Snapshot,uninstall:bool)->Result<String,String>{
     if crate::wolf::is_wolf(&snapshot.info.engine) {crate::wolf::patch(&snapshot.registry,uninstall)} else if crate::rgss::legacy(&snapshot.info.engine) {crate::rgss::patch(&snapshot.registry,uninstall)} else {patch_registry(&snapshot.registry,uninstall)}
@@ -91,11 +97,12 @@ fn open_zip(path: &Path) -> Result<ZipArchive<File>, String> {
     Ok(zip)
 }
 fn read_text(zip: &mut ZipArchive<File>, name: &str) -> Result<Option<String>, String> {
+    let limit = if name.rsplit('/').next().is_some_and(|n| n.eq_ignore_ascii_case("plugins.js")) { MAX_REGISTRY } else { MAX_TEXT };
     match zip.by_name(name) {
         Ok(file) => {
-            if file.size() > MAX_TEXT { return Err(format!("{name} dépasse 4 Mo.")); }
-            let mut value = String::new(); file.take(MAX_TEXT + 1).read_to_string(&mut value).map_err(|_|format!("{name} n'est pas un texte UTF-8 valide."))?;
-            if value.len() as u64 > MAX_TEXT { return Err("Texte trop volumineux.".into()); } Ok(Some(value))
+            if file.size() > limit { return Err(format!("{name} dépasse {} Mio.", limit / 1024 / 1024)); }
+            let mut value = String::new(); file.take(limit + 1).read_to_string(&mut value).map_err(|_|format!("{name} n'est pas un texte UTF-8 valide."))?;
+            if value.len() as u64 > limit { return Err("Texte trop volumineux.".into()); } Ok(Some(value))
         },
         Err(zip::result::ZipError::FileNotFound) => Ok(None), Err(e) => Err(e.to_string()),
     }
@@ -395,6 +402,29 @@ mod tests {
     #[test] fn safe_names(){for n in ["../a","/absolute","C:/a","a\\b","a/../b","a//b"]{assert!(!valid_name(n));}assert!(valid_name("Jeu/日本語/file.ogg"));}
     #[test] fn parser_refuses_executable_registry(){assert!(patch_registry("var $plugins = evil();",false).is_err());assert!(patch_registry("var $plugins = [{\"name\":\"RPGMToolkit\"},{\"name\":\"RPGMToolkit\"}];",false).is_err());}
     #[test] fn installation_is_idempotent(){let a=patch_registry("var $plugins = [];",false).unwrap();let b=patch_registry(&a,false).unwrap();assert_eq!(a,b);assert_eq!(parse_registry(&a).unwrap().1.len(),1);}
+    #[test]
+    fn large_registry_preserves_parameters_in_zip_without_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("large.zip");
+        let parameter = "日本語 ".repeat(600_000);
+        let original = json!([{"name":"Other", "status":true, "parameters":{"text":parameter}}]);
+        let registry = format!("var $plugins = {original};");
+        assert!(registry.len() as u64 > MAX_TEXT);
+        let mut archive = ZipWriter::new(File::create(&input).unwrap());
+        for (path, text) in [("Data/js/rpg_core.js", "Utils.RPGMAKER_VERSION='1.5.2';"), ("Data/js/plugins.js", registry.as_str()), ("Data/data/System.json", "{\"gameTitle\":\"Large registry\"}"), ("save/1", "original save")] {
+            archive.start_file(path, SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated)).unwrap();
+            archive.write_all(text.as_bytes()).unwrap();
+        }
+        archive.finish().unwrap();
+        let snapshot = inspect_zip(&input, "large.zip").unwrap();
+        assert_eq!(snapshot.info.title, "Large registry");
+        let installed = dir.path().join("installed.zip");
+        transform_zip(&input, &installed, &snapshot, EMBEDDED_MOD, false, |_,_|{}).unwrap();
+        let next = inspect_zip(&installed, "installed.zip").unwrap();
+        let removed = patch_registry(&next.registry, true).unwrap();
+        assert_eq!(Value::Array(parse_registry(&removed).unwrap().1), original);
+        assert_eq!(read_text(&mut open_zip(&installed).unwrap(), "save/1").unwrap().unwrap(), "original save");
+    }
     #[test] fn fingerprint_detects_plugin_changes(){assert_ne!(fingerprint("a",None),fingerprint("a",Some("")));assert_ne!(fingerprint("a",Some("1")),fingerprint("a",Some("2")));}
     #[test] fn javascript_literal_registry_preserves_user_parameters(){
         let input=r#"// Generated by RPG Maker.

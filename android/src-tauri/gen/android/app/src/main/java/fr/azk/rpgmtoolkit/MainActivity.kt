@@ -15,6 +15,10 @@ class MainActivity : TauriActivity() {
   }
   override fun onResume() {
     super.onResume()
+    if (AppUpdater.awaitingPermission && packageManager.canRequestPackageInstalls()) {
+      AppUpdater.awaitingPermission = false
+      java.util.concurrent.Executors.newSingleThreadExecutor().let { executor -> executor.execute { try { AppUpdater.install(this) } catch (_: Exception) {} finally { executor.shutdown() } } }
+    }
     if (WolfSession.awaitingPermission && android.provider.Settings.canDrawOverlays(this) && WolfSession.root != null) {
       WolfSession.awaitingPermission=false
       requestWolfNotifications()
@@ -22,9 +26,10 @@ class MainActivity : TauriActivity() {
     }
   }
   override fun onCreate(savedInstanceState: Bundle?) {
-    enableEdgeToEdge(statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT), navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT))
+    enableEdgeToEdge(statusBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT), navigationBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT))
     super.onCreate(savedInstanceState)
-    window.decorView.setBackgroundColor(Color.rgb(16, 25, 29))
+    window.decorView.setBackgroundColor(Color.rgb(241, 242, 244))
+    AppUpdater.schedule(this)
   }
 
   override fun onWebViewCreate(webView: WebView) {

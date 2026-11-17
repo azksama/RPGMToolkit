@@ -12,6 +12,7 @@ enum M {
     Nil,
     Bool(bool),
     Int(i32),
+    BigInt(u8, Vec<u8>),
     Bytes(Vec<u8>),
     Symbol(Vec<u8>),
     Array(Vec<M>),
@@ -19,7 +20,7 @@ enum M {
 }
 fn weight(v: &M) -> usize {
     64 + match v {
-        M::Bytes(b) | M::Symbol(b) => b.len(),
+        M::Bytes(b) | M::Symbol(b) | M::BigInt(_, b) => b.len(),
         M::Array(a) => a.iter().map(weight).sum(),
         M::Ivar(v, a) => weight(v) + a.iter().map(|(k, v)| weight(k) + weight(v)).sum::<usize>(),
         _ => 0,
@@ -80,6 +81,20 @@ impl Decoder<'_> {
             b'T' => Ok(M::Bool(true)),
             b'F' => Ok(M::Bool(false)),
             b'i' => Ok(M::Int(self.integer()?)),
+            b'l' => {
+                let sign = self.byte()?;
+                if sign != b'+' && sign != b'-' {
+                    return Err("Signe entier Marshal invalide.".into());
+                }
+                let length = self.size(512)? * 2;
+                let end = self.pos.checked_add(length).ok_or("Taille entière invalide.")?;
+                let bytes = self.data.get(self.pos..end).ok_or("Entier Marshal tronqué.")?.to_vec();
+                self.pos = end;
+                self.charge(length * 2 + 128)?;
+                let value = M::BigInt(sign, bytes);
+                self.objects.push(Some(value.clone()));
+                Ok(value)
+            }
             b'@' => {
                 let i = self.size(self.objects.len())?;
                 let n = self
@@ -184,6 +199,11 @@ fn encode(v: &M, out: &mut Vec<u8>) {
             out.push(b'i');
             integer(*n, out)
         }
+        M::BigInt(sign, bytes) => {
+            out.extend([b'l', *sign]);
+            integer((bytes.len() / 2) as i32, out);
+            out.extend(bytes);
+        }
         M::Bytes(b) | M::Symbol(b) => {
             out.push(if matches!(v, M::Bytes(_)) { b'"' } else { b':' });
             integer(b.len() as i32, out);
@@ -237,7 +257,7 @@ fn entries(data: &[u8]) -> Result<Vec<M>, String> {
         match v {
             M::Array(row)
                 if row.len() == 3
-                    && matches!(row[0], M::Int(_))
+                    && matches!(row[0], M::Int(_) | M::BigInt(_, _))
                     && raw(&row[1]).is_some()
                     && raw(&row[2]).is_some() => {}
             _ => return Err("Entrée de script invalide.".into()),
@@ -474,6 +494,24 @@ pub(crate) mod tests {
                 fields(&patch(&installed, true).unwrap()).unwrap().0,
                 ini.as_bytes()
             );
+        }
+    }
+    #[test]
+    fn preserves_large_script_ids_and_object_links() {
+        // Marshal.dump([[2**31, "Main", ""], [2**31, "Main", ""]]) on 32-bit Ruby.
+        let data = [4, 8, b'[', 7, b'[', 8, b'l', b'+', 7, 0, 0, 0, 128,
+            b'"', 9, b'M', b'a', b'i', b'n', b'"', 0,
+            b'[', 8, b'@', 7, b'@', 8, b'@', 9];
+        let before = entries(&data).unwrap();
+        assert_eq!(before[0], before[1]);
+        let installed = patch_scripts(&data, false).unwrap();
+        assert_eq!(inspect_scripts(&installed).unwrap(), (3, Some(CODE.into())));
+        assert_eq!(entries(&patch_scripts(&installed, true).unwrap()).unwrap(), before);
+    }
+    #[test]
+    fn rejects_truncated_and_invalid_bignums() {
+        for bytes in [vec![4, 8, b'l', b'?', 0], vec![4, 8, b'l', b'+', 7, 0]] {
+            assert!(inspect_scripts(&bytes).is_err());
         }
     }
     #[test]

@@ -10,6 +10,7 @@ class WolfTransport(private val storage: WolfStorage, private val folder: Docume
     private var pendingOperations: JSONArray? = null
     private var pendingMutating = false
     init {
+        DocumentQueries.refresh()
         val previous=folder.toolkitChild("ack.txt")?.let { storage.read(it,65536).toString(Charsets.UTF_8).removePrefix("\uFEFF").trim().toIntOrNull() } ?: 0
         counter=(previous.coerceIn(0,999998)+1)
     }
@@ -35,6 +36,7 @@ class WolfTransport(private val storage: WolfStorage, private val folder: Docume
         return result
     }
     private fun exchangeOnce(operations: JSONArray): JSONObject {
+        DocumentQueries.refresh()
         require(operations.length() in 1..128) { "1 à 128 opérations maximum." }
         for(i in 0 until operations.length()) {
             val op=operations.getJSONObject(i);val index=integer(op,"index");val action=integer(op,"action")
@@ -72,6 +74,7 @@ class WolfTransport(private val storage: WolfStorage, private val folder: Docume
         storage.write(folder,"request.txt",id.toString().toByteArray(Charsets.US_ASCII))
         val end=android.os.SystemClock.elapsedRealtime()+10000
         while(android.os.SystemClock.elapsedRealtime()<end && !Thread.currentThread().isInterrupted) {
+            DocumentQueries.refresh()
             if(text("ack.txt")?.trim()?.toIntOrNull()==id) {
                 val result=response(id,operations,mutating);pending=0;pendingOperations=null;return result
             }

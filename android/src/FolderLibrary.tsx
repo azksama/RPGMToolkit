@@ -1,9 +1,9 @@
 import {useEffect,useRef,useState} from 'react';
-import {FolderPlus,RefreshCw,Trash2,X} from 'lucide-react';
+import {FolderPlus,ArrowClockwise as RefreshCw,Trash as Trash2,X} from '@phosphor-icons/react';
 import type {FolderGame,Run,State} from './types';
 
-const plans = {install:'À installer',update:'À mettre à jour',repair:'À réparer',current:'Déjà à jour',recover:'À restaurer',blocked:'Incompatible / inaccessible'};
-const results:Record<string,string> = {installed:'Installé',updated:'Mis à jour',removed:'Désinstallé',current:'Déjà à jour',absent:'Mod absent',failed:'Échec',restored:'Restauré'};
+const plans = {install:'À installer',update:'À mettre à jour',repair:'À réparer',current:'À jour',recover:'À restaurer',blocked:'À vérifier'};
+const results:Record<string,string> = {installed:'Installé',updated:'Mis à jour',removed:'Désinstallé',current:'À jour',absent:'Mod absent',failed:'Échec',restored:'Restauré'};
 const eligible = (game:FolderGame) => !['blocked','recover'].includes(game.plan);
 
 export function FolderLibrary({state,busy,run,onComplete,onOpenWolf}:{state:State;busy:boolean;run:Run;onOpenWolf:(token:string)=>void;onComplete:(game:string,action:string)=>void}) {

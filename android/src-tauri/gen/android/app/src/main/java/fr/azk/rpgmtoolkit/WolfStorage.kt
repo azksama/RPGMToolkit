@@ -131,10 +131,11 @@ class WolfStorage(private val context: Context) {
         writeState(backup,before)
         val journal=JSONObject().put("backup",id).put("fingerprint",args.expected)
         write(backup,"manifest.json",journal.toString().toByteArray(Charsets.UTF_8))
+        DocumentQueries.refresh()
         require(fingerprint(current(root))==args.expected) { "Le jeu a changé pendant la copie de secours." }
         write(root,PENDING,journal.toString().toByteArray(Charsets.UTF_8))
         try {
-            replace(root,next);require(fingerprint(current(root))==fingerprint(next)) { "Vérification de l’installation WOLF échouée." };remove(root,PENDING)
+            replace(root,next);DocumentQueries.refresh();require(fingerprint(current(root))==fingerprint(next)) { "Vérification de l’installation WOLF échouée." };remove(root,PENDING)
         } catch(e: Exception) {
             try {restore(root)}catch(rollback: Exception){error("${e.message} Restauration WOLF requise : ${rollback.message}")}
             error("${e.message} Fichiers précédents restaurés.")
@@ -144,6 +145,6 @@ class WolfStorage(private val context: Context) {
     fun restore(root: DocumentFile) {
         val marker=root.toolkitChild(PENDING) ?: return
         val journal=JSONObject(read(marker,65536).toString(Charsets.UTF_8));val previous=state(root,journal)
-        replace(root,previous);require(fingerprint(current(root))==journal.getString("fingerprint")) { "Restauration WOLF incorrecte." };require(marker.delete())
+        replace(root,previous);DocumentQueries.refresh();require(fingerprint(current(root))==journal.getString("fingerprint")) { "Restauration WOLF incorrecte." };require(marker.delete())
     }
 }

@@ -1,16 +1,16 @@
-# RPGM Toolkit Android — 1.9.4
+# RPGM Toolkit Android — 1.10.0
 
 Application Android Rust + Tauri 2, interface React/TypeScript, accès aux fichiers par un plugin Kotlin Storage Access Framework. Les modules MV/MZ `RPGMToolkit.js` et XP/VX/VX Ace `RPGMToolkit.rb` sont embarqués dans la bibliothèque Rust.
 
 ## Utilisation
 
 1. Installer l’APK et ouvrir **RPGM Toolkit**.
-2. Choisir **Archive ZIP** ou **Dossier du jeu**. Le sélecteur Android donne accès uniquement au fichier ou au dossier choisi.
+2. Choisir **Archive ZIP** ou **Dossiers de jeux**. Le sélecteur Android donne accès uniquement au fichier ou au dossier choisi.
 3. Vérifier le titre, le moteur et l’état du mod détectés.
 4. Choisir **Installer le mod**, ou **Désinstaller le mod** si le Toolkit est présent.
 5. Pour un ZIP, enregistrer le nouveau fichier, l’extraire, puis sélectionner le jeu extrait dans JoiPlay. Pour un dossier, le jeu est modifié directement et peut être rouvert.
 
-Le mod est déjà inclus. Le lien **Choisir un autre ZIP du mod** accepte une archive contenant exactement un `RPGMToolkit.js`, pour installer une autre version de ce même mod. Cet import concerne MV/MZ ; RGSS et WOLF utilisent leurs modules inclus.
+Le mod est déjà inclus. Dans **Réglages**, **Importer un ZIP du mod** accepte une archive contenant exactement un `RPGMToolkit.js`, pour installer une autre version de ce même mod. Cet import concerne MV/MZ ; RGSS et WOLF utilisent leurs modules inclus.
 
 ## Sauvegardes et récupération
 
@@ -27,9 +27,25 @@ La désinstallation retire `RPGMToolkit.js` et son entrée dans la liste des plu
 - Un jeu par ZIP ; plusieurs dossiers ou un dossier parent pour les bibliothèques. `plugins.js` accepte JSON et les littéraux JavaScript de données usuels, sans expressions exécutables.
 - XP/VX/VX Ace : `Game.ini` et scripts Marshal standards, seuls ou dans une archive RGSSAD v1/v3. La copie modifiée des scripts est écrite dans `RPGMToolkit/`, et `Game.ini` redirige vers cette copie. Les originaux restent intacts. La désinstallation restaure exactement le `Game.ini` original.
 - Les scripts RGSS sont limités à 16 Mo. Les runtimes propriétaires, scripts obfusqués ou formats modifiés peuvent être refusés. Voir [le guide RGSS](../plugin/rgss/README.md).
-- Jeux ZIP de 8 Go maximum, 100 000 entrées et 16 Go de taille décompressée déclarée. ZIP du mod de 16 Mo maximum ; fichiers de configuration et plugin limités à 4 Mo. Les ZIP protégés par mot de passe, les chemins dangereux, les doublons et les liens sont refusés.
+- Jeux ZIP de 8 Go maximum, 100 000 entrées et 16 Go de taille décompressée déclarée. ZIP du mod de 16 Mo maximum ; `plugins.js` jusqu’à 64 Mio, autres fichiers de configuration et plugin limités à 4 Mio. Les ZIP protégés par mot de passe, les chemins dangereux, les doublons et les liens sont refusés.
 - Les APK de jeux et les répertoires privés d’autres applications ne sont pas modifiés. Choisir un dossier partagé accessible, par exemple `Documents/Jeux`. La compatibilité du jeu lui-même avec JoiPlay reste nécessaire.
 - L’installateur traite les fichiers localement. La traduction des noms dans le mod en jeu utilise un service en ligne uniquement à la demande ; les alias n’altèrent pas les noms internes du jeu.
+
+## Mises à jour de l’application
+
+Dans **Réglages → Application**, les mises à jour automatiques sont activées par défaut, en Wi-Fi. Android WorkManager vérifie les releases publiques de `azksama/RPGMToolkit` toutes les 12 heures, selon les contraintes réseau et batterie du système. Le téléchargement continue lorsque l’application passe en arrière-plan ; Android peut le reporter ou le relancer après une interruption.
+
+**Vérifier** recherche la dernière version stable. **Télécharger** utilise le réseau disponible, même si l’automatisation est limitée au Wi-Fi. Après téléchargement, **Installer** ouvre l’installateur Android ; la première installation demande d’autoriser cette application comme source. La confirmation Android reste nécessaire. L’installation conserve les données de l’application.
+
+L’APK doit correspondre au nom du paquet, au code de version annoncé, à l’empreinte SHA-256 publiée par GitHub et au certificat de signature de l’application déjà installée. Aucun jeton GitHub n’est stocké. Une application recompilée avec une autre clé ne peut pas utiliser les APK officiels pour se mettre à jour.
+
+## Compatibilité et accès aux dossiers
+
+Un dossier MV/MZ complet n’a pas besoin de `index.html` pour recevoir le plugin : le lanceur peut se trouver ailleurs. Les fichiers du moteur, le registre et `data/System.json` restent contrôlés. L’installateur ne crée ni ne remplace le lanceur du jeu.
+
+Les identifiants de scripts RGSS encodés comme grands entiers Marshal et leurs références sont conservés. Aucun script n’est exécuté pendant l’analyse.
+
+Les métadonnées SAF sont chargées en une requête par dossier et réutilisées pendant une opération. Les caches sont bornés et invalidés lors des mutations ; les empreintes sont recalculées après la copie de secours. Le lecteur utilise JSON directement quand c’est possible, puis JSON5 pour les littéraux JavaScript.
 
 ## Architecture
 
@@ -71,7 +87,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib --locked
 
 Application indépendante de RPG Maker et de JoiPlay. Voir le rapport de validation livré pour distinguer les tests automatisés, les essais sur émulateur et la validation sur un jeu réel.
 
-La sélection de dossiers accepte une bibliothèque contenant plusieurs jeux et des ajouts successifs de dossiers. Le mod embarqué reste en version 1.9.0. Voir le guide bibliothèque du README principal.
+La sélection de dossiers accepte une bibliothèque contenant plusieurs jeux et des ajouts successifs de dossiers. Le mod MV/MZ embarqué est en version 1.10.0. Voir le guide bibliothèque du README principal.
 
 
 ## WOLF / Winlator

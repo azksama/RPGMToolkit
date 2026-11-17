@@ -28,7 +28,7 @@ impl FolderGame {
 
     pub fn set_snapshot(&mut self, mut snapshot: Snapshot) {
         self.mod_hash = snapshot.previous_mod.take().map(|code| engine::hash(code.as_bytes()));
-        if crate::rgss::legacy(&snapshot.info.engine) || crate::wolf::is_wolf(&snapshot.info.engine) { snapshot.registry.clear(); }
+        snapshot.registry = String::new();
         self.snapshot = Some(snapshot);
     }
 
@@ -54,8 +54,8 @@ impl FolderGame {
         self.result.clear();
         let result = (|| {
             let expected = self.snapshot.as_ref().ok_or_else(|| self.error.clone().unwrap_or("Jeu incompatible.".into()))?.info.fingerprint.clone();
-            let fresh = folder_snapshot(&native("inspectFolder", json!({"token":self.token}))?)?;
-            let registry = fresh.registry.clone();
+            let mut fresh = folder_snapshot(&native("inspectFolder", json!({"token":self.token}))?)?;
+            let registry = std::mem::take(&mut fresh.registry);
             let changed = fresh.info.fingerprint != expected;
             self.title = fresh.info.title.clone();
             self.set_snapshot(fresh);
@@ -69,7 +69,7 @@ impl FolderGame {
                 return Ok(());
             }
             let code = if crate::wolf::is_wolf(&snapshot.info.engine) { crate::wolf::CODE } else if crate::rgss::legacy(&snapshot.info.engine) { crate::rgss::CODE } else { code };
-            let patched = if crate::wolf::is_wolf(&snapshot.info.engine) { crate::wolf::patch(&registry,uninstall)? } else if crate::rgss::legacy(&snapshot.info.engine) { crate::rgss::patch(&registry,uninstall)? } else { engine::patch_snapshot(snapshot, uninstall)? };
+            let patched = if crate::wolf::is_wolf(&snapshot.info.engine) { crate::wolf::patch(&registry,uninstall)? } else if crate::rgss::legacy(&snapshot.info.engine) { crate::rgss::patch(&registry,uninstall)? } else { engine::patch_registry(&registry, uninstall)? };
             let data = native("applyFolder", json!({"token":self.token,"registry":patched,"plugin":if uninstall {None}else{Some(code)},"expected":snapshot.info.fingerprint,"uninstall":uninstall}))?;
             let checked = folder_snapshot(&data)?;
             if checked.info.status != if uninstall { "absent" } else { "installed" } || (!uninstall && checked.previous_mod.as_deref() != Some(code)) {
@@ -104,6 +104,13 @@ mod tests {
         assert_eq!(FolderGame::from_scan(&data(&installed,Some("new"))).unwrap().plan("new"), "current");
         assert_eq!(FolderGame::from_scan(&data(&installed,None)).unwrap().plan("new"), "repair");
         assert_eq!(FolderGame::from_scan(&data("invalid",None)).unwrap().plan("new"), "blocked");
+    }
+    #[test]
+    fn library_snapshots_release_registry_allocations() {
+        let registry = format!("var $plugins = [{{\"name\":\"Other\",\"parameters\":{{\"text\":\"{}\"}}}}];", "a".repeat(1024 * 1024));
+        let game = FolderGame::from_scan(&data(&registry, None)).unwrap();
+        assert_eq!(game.snapshot.as_ref().unwrap().registry.capacity(), 0);
+        assert_eq!(game.plan("new"), "install");
     }
     #[test]
     fn fresh_check_prevents_stale_writes_and_current_games_are_not_rewritten() {
