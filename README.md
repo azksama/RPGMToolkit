@@ -1,6 +1,6 @@
 # RPGM Toolkit
 
-Mod intégré pour RPG Maker XP, VX, VX Ace, MV et MZ, éditeur WOLF pour Winlator et installateur Android **Rust + Tauri 2**, version **1.9.3**.
+Mod intégré pour RPG Maker XP, VX, VX Ace, MV et MZ, éditeur WOLF pour Winlator et installateur Android **Rust + Tauri 2**, version **1.9.4**.
 
 Le [guide WOLF](wolf/README.md) décrit le menu flottant, les profils d’objets/HP/stats et les formats pris en charge. Les dossiers RPG Maker peuvent contenir directement `js/` et `data/`, sans `www/`, ou se trouver dans des sous-dossiers comme `Data/`.
 

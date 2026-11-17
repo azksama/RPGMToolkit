@@ -1,6 +1,8 @@
-# RPGM Toolkit 1.0.1
+# RPGM Toolkit 1.9.4
 
-Un panneau intégré à RPG Maker **MV 1.6+ et MZ**, pour explorer et modifier votre partie. Un seul fichier JavaScript, sans dépendance à installer dans le jeu.
+Un panneau intégré à RPG Maker **MV 1.x et MZ**, pour explorer et modifier votre partie. Un seul fichier JavaScript, sans dépendance à installer dans le jeu.
+
+La 1.9.4 corrige le plantage `isClosing` pendant les changements de carte. Sur Android, fermez le jeu, installez le nouvel APK puis utilisez **Installer / mettre à jour** sur le dossier du jeu. La mise à jour de l’application seule ne remplace pas un mod déjà installé.
 
 Pour essayer l’interface avant de l’installer, ouvrez `demo/index.html` dans un navigateur puis cliquez sur **Ouvrir le panneau**. Cette démonstration utilise des données simulées.
 
@@ -11,7 +13,7 @@ Pour essayer l’interface avant de l’installer, ouvrez `demo/index.html` dans
 3. Double-cliquez sur **Installer.cmd**.
 4. Sélectionnez le dossier du jeu. L’installateur reconnaît également le sous-dossier `www` des jeux MV.
 5. Lisez les changements annoncés, puis tapez **OUI** pour les appliquer.
-6. Lancez ou chargez une partie et rejoignez la carte. Appuyez sur **F6**, ou cliquez sur **Toolkit** en haut à droite.
+6. Lancez ou chargez une partie et rejoignez la carte. Appuyez sur **F6**, ou cliquez sur **Toolbox** en haut à gauche par défaut.
 
 L’installateur copie `RPGMToolkit.js` dans `js/plugins/`, puis l’active en fin de liste dans `js/plugins.js`. Il sauvegarde les fichiers touchés dans `RPGMToolkit-backups/<date-identifiant>/` et vérifie les fichiers écrits. Les autres plugins conservent leurs paramètres et leur ordre relatif. La liste JSON est reformattée. Aucun fichier de données ni de sauvegarde du jeu n’est modifié pendant l’installation.
 
@@ -142,8 +144,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install-RPGMToolkit.ps
 
 ## Compatibilité et limites
 
-- Cible : **MV 1.6+ / MZ**, rendu HTML/NW.js standard. Pas de dépendance au gestionnaire de fenêtres de l’un des deux moteurs.
-- Le panneau s’ouvre **sur la carte**, après chargement ou démarrage d’une partie. Il ne s’ouvre pas au titre, dans les menus ou pendant un combat.
+- Cible : **MV 1.x / MZ**, rendu HTML/NW.js standard. Pas de dépendance au gestionnaire de fenêtres de l’un des deux moteurs.
+- Le panneau s’ouvre sur la carte ou pendant un combat, après démarrage de la scène. Il ne s’ouvre pas au titre ou dans les menus du jeu.
 - Les valeurs de variables structurées (objets/tableaux) sont en lecture seule. Les nombres modifiés doivent être entiers. Le moteur MV/MZ restitue certaines valeurs falsy, dont une chaîne vide, comme `0` : le panneau affiche la valeur effectivement retournée par le moteur.
 - Les quantités respectent `maxItems` et l’or respecte `maxGold`. La diminution du sac ne retire pas l’équipement porté. Les emplacements verrouillés et restrictions d’équipement du moteur sont respectés.
 - Aucun contournement de chiffrement/protection, modification d’archive ou injection mémoire. Le jeu doit exposer son dossier `js/plugins` standard et permettre les plugins.

@@ -1,3 +1,20 @@
+# Validation 1.9.4
+
+Vérifications du 17 novembre 2026.
+
+- Le journal JoiPlay fourni signale quatre plantages MZ dans `createToolkitPortrait.safe`, appelé par `tick` pendant un changement de scène : `Cannot read properties of undefined (reading 'isClosing')`.
+- Reproduction avec le plugin complet 1.9.3 : les deux parcours MZ, portrait désactivé et activé, échouent dans `safe` et `tick` aux mêmes lignes que le journal. Les deux parcours MV passent.
+- Le contrôle portrait attend désormais le démarrage MV/MZ et l’activation de la scène ; les fenêtres ne sont pas consultées lorsque le portrait est désactivé ou sans redimensionnement en attente.
+- 63 tests JavaScript réussis, dont les changements de carte après initialisation du Toolkit, le chargement différé des fenêtres et le contrôleur portrait. La fixture MZ utilise maintenant son API de démarrage propre et expose `Graphics`, absent des anciens tests du cycle de vie.
+- 5 parcours Chromium réussis : portrait et restauration sur deux viewports, téléportation, interface WOLF et catalogue de 200 032 champs.
+- 24 assertions de l’installateur PowerShell réussies : installation, répétition, désinstallation et conservation des plugins existants.
+- APK release ARM64, ARMv7 et x86_64 signé avec le certificat existant ; signature, alignement ZIP/ELF de 16 Ko et identité des modules embarqués avec les sources vérifiés.
+- Mise à jour APK 1.9.3 vers 1.9.4 sur un émulateur Android Studio API 36.1 : installation sans désinstallation préalable, démarrage et affichage « Toolkit 1.9.4 · inclus » contrôlés par ADB/UI Automator. Aucun plantage dans le journal Android de ce parcours.
+
+Les cycles MV/MZ sont simulés. Aucun test sur le jeu du signalement, dans JoiPlay réel ou sur un téléphone physique n’est revendiqué.
+
+---
+
 # Validation 1.9.3
 
 Vérifications du 9 octobre 2026.

@@ -21,10 +21,12 @@ function createToolkitPortrait(g, runtime) {
     }
     function safe() {
         var scene=manager && manager._scene;
-        return supported() && scene instanceof g.Scene_Map && !manager.isSceneChanging() &&
-            (!manager.isCurrentSceneStarted || manager.isCurrentSceneStarted()) &&
-            (!scene.isBusy || !scene.isBusy()) && (!scene.isActive || scene.isActive()) &&
-            g.$gamePlayer && !g.$gamePlayer.isTransferring() &&
+        if (!supported() || !(scene instanceof g.Scene_Map) || manager.isSceneChanging()) return false;
+        var started=typeof manager.isCurrentSceneStarted==='function' ? manager.isCurrentSceneStarted() :
+            typeof scene.isStarted==='function' && scene.isStarted();
+        if (!started || (typeof scene.isActive==='function' && !scene.isActive())) return false;
+        return (!scene.isBusy || !scene.isBusy()) &&
+            g.$gamePlayer && g.$gameMap && g.$gameMessage && !g.$gamePlayer.isTransferring() &&
             (!g.$gameMap.isEventRunning || !g.$gameMap.isEventRunning()) && !g.$gameMessage.isBusy();
     }
     function desiredSize() {
@@ -56,12 +58,13 @@ function createToolkitPortrait(g, runtime) {
         } else if (!value && locked && orientation && orientation.unlock) { orientation.unlock(); locked=false; }
     }
     function tick(opened) {
-        if (!supported() || opened || !safe()) return false;
+        if (!supported() || opened) return false;
         var wanted=!!runtime.prefs.settings.portrait;
-        setViewport(wanted);
-        var size=desiredSize();
         if (!wanted && !active) { dirty=false; return false; }
+        var size=desiredSize();
         if (wanted===active && (!dirty || (graphics.width===size.width && graphics.height===size.height))) { dirty=false; return false; }
+        if (!safe()) return false;
+        setViewport(wanted);
         if (!original) original={width:graphics.width,height:graphics.height,boxWidth:graphics.boxWidth,boxHeight:graphics.boxHeight,stretch:graphics._stretchEnabled,manager:{
             _screenWidth:manager._screenWidth,_screenHeight:manager._screenHeight,_boxWidth:manager._boxWidth,_boxHeight:manager._boxHeight
         }};

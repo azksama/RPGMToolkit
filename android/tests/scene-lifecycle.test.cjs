@@ -14,6 +14,8 @@ async function run(engine, showButton, check, code=plugin) {
   await page.evaluate(()=>{window.setInterval=()=>0;});
   await page.addScriptTag({content:fixture});
   await page.evaluate(({engine,showButton})=>{
+   Utils.RPGMAKER_NAME=engine;
+   window.Graphics={width:816,height:624,boxWidth:816,boxHeight:624,resize(w,h){this.width=w;this.height=h;}};
    PluginManager.parameters=()=>({ShowButton:String(showButton)});
    window.loading={data:false,images:false,reads:0,busy:0,updates:0,ticks:0};
    Scene_Map=function(){this._started=false;this._active=false;};
@@ -40,6 +42,7 @@ async function run(engine, showButton, check, code=plugin) {
     Scene_Map.prototype.isStarted=function(){return this._started;};
     SceneManager.updateScene=function(){loading.ticks++;if(this._scene){if(this._scene.isStarted())loading.updates++;else if(this._scene.isReady())this._scene.start();}};
    }
+   SceneManager.goto=function(type){this._scene=new type();this._sceneStarted=false;loading.data=false;loading.images=false;};
   },{engine,showButton});
   await page.addScriptTag({content:code});
   await check(page);
@@ -54,6 +57,43 @@ test('the original 1.0.0 plugin reproduces the reported MZ isClosing crash',asyn
 });
 
 for(const engine of ['MV','MZ']){
+ for(const portrait of [false,true]){
+  test(`${engine}: map transfers after Toolkit initialization, portrait ${portrait?'enabled':'disabled'}`,async()=>{
+   await run(engine,true,async page=>{
+    const errors=[];page.on('pageerror',e=>errors.push(e.message));
+    assert.equal(await page.evaluate(()=>{loading.data=true;loading.images=true;SceneManager.updateScene();return RPGMToolkit.open();}),true);
+    if(portrait){
+     await page.locator('[data-action="tool-settings"]').click();
+     await page.locator('[data-setting="portrait"]').check();
+    }else await page.evaluate(()=>RPGMToolkit.close());
+    const pending=await page.evaluate(()=>{
+     SceneManager.goto(Scene_Map);loading.reads=0;loading.busy=0;
+     for(let i=0;i<10;i++)SceneManager.updateScene();
+     return {reads:loading.reads,busy:loading.busy,width:Graphics.width,opened:RPGMToolkit.open()};
+    });
+    assert.deepEqual(pending,{reads:10,busy:0,width:816,opened:false});
+    assert.deepEqual(await page.evaluate(()=>{
+     loading.data=true;SceneManager.updateScene();
+     return {window:!!SceneManager._scene._messageWindow,busy:loading.busy,width:Graphics.width};
+    }),{window:true,busy:0,width:816});
+    await page.evaluate(()=>{loading.images=true;SceneManager.updateScene();SceneManager.updateScene();});
+    assert.equal(await page.evaluate(()=>Graphics.width),portrait?720:816);
+    // A portrait resize recreates the map scene too; it must finish loading normally.
+    const second=await page.evaluate(()=>{
+     SceneManager.goto(Scene_Map);loading.reads=0;loading.busy=0;
+     dispatchEvent(new Event('resize'));
+     for(let i=0;i<5;i++)SceneManager.updateScene();
+     return {reads:loading.reads,busy:loading.busy};
+    });
+    assert.deepEqual(second,{reads:5,busy:0});
+    assert.equal(await page.evaluate(()=>{
+     loading.data=true;loading.images=true;SceneManager.updateScene();SceneManager.updateScene();
+     return RPGMToolkit.open();
+    }),true);
+    assert.deepEqual(errors,[]);
+   });
+  });
+ }
  test(`${engine}: delayed loading, ready/start, pause/resume and closing window`,async()=>{
   await run(engine,true,async page=>{
    const loading=await page.evaluate(()=>{

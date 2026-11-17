@@ -6,6 +6,10 @@ function fixture(engine='MV'){
  g.Scene_Base=function(){};g.Scene_Base.prototype.start=function(){};
  g.Scene_Map=function(){};g.Scene_Map.prototype=Object.create(g.Scene_Base.prototype);
  g.SceneManager={_scene:new g.Scene_Map(),_screenWidth:816,_screenHeight:624,_boxWidth:800,_boxHeight:600,isSceneChanging:()=>false,isCurrentSceneStarted:()=>true,goto(type){this._scene=new type();g.rebuilt=(g.rebuilt||0)+1;}};
+ if(engine==='MZ'){
+  delete g.SceneManager.isCurrentSceneStarted;
+  g.Scene_Map.prototype.isStarted=function(){return this._started!==false;};
+ }
  g.Graphics={width:816,height:624,boxWidth:800,boxHeight:600,_stretchEnabled:false,_updateAllElements(){g.updated=true;}};
  if(engine==='MZ')g.Graphics.resize=function(w,h){this.width=w;this.height=h;};
  g.$gamePlayer={x:8,y:12,isTransferring:()=>false,center(x,y){g.center=[x,y];}};
@@ -26,6 +30,31 @@ for(const engine of ['MV','MZ'])test(engine+': true portrait resolution, delayed
  assert(p.tick(false));assert.equal(g.Graphics.width,720);assert.equal(g.Graphics.height,1280);assert.equal(g.Graphics.boxWidth,720);assert.equal(g.Graphics.boxHeight,1280);assert.deepEqual(g.center,[8,12]);
  assert.equal(g.$gamePlayer.x,8);assert.equal(g.$gamePlayer.y,12);assert.equal(p.tick(false),false);assert.equal(g.rebuilt,1);
  p.request(false);assert(p.tick(false));assert.deepEqual([g.Graphics.width,g.Graphics.height,g.Graphics.boxWidth,g.Graphics.boxHeight,g.Graphics._stretchEnabled],[816,624,800,600,false]);assert.equal(g.SceneManager._boxWidth,800);
+});
+
+for(const engine of ['MV','MZ'])test(engine+': portrait waits for scene start and activity before reading windows',()=>{
+ const {g,p,runtime}=fixture(engine),scene=g.SceneManager._scene;
+ let reads=0,busy=0,started=false,active=false;
+ scene.isReady=()=>{reads++;return false;};
+ scene.isBusy=()=>{busy++;return scene._messageWindow.isClosing();};
+ scene.isActive=()=>active;
+ if(engine==='MV')g.SceneManager.isCurrentSceneStarted=()=>started;
+ else scene.isStarted=()=>started;
+ runtime.prefs.settings.portrait=true;
+ assert.equal(p.tick(false),false);
+ assert.throws(()=>p.request(false),/carte/);
+ started=true;
+ assert.equal(p.tick(false),false);
+ assert.equal(busy,0);assert.equal(reads,0);
+ active=true;scene._messageWindow={isClosing:()=>false};
+ assert.equal(p.tick(false),true);assert.equal(busy,1);
+ assert.equal(g.Graphics.width,720);
+});
+
+test('disabled portrait does not inspect scene windows',()=>{
+ const {g,p}=fixture('MZ');
+ g.SceneManager._scene.isBusy=()=>{throw new Error('Unexpected scene query');};
+ assert.equal(p.tick(false),false);
 });
 test('aspect fills taller portrait screens; resize waits for map and event completion',()=>{
  const {g,p,events}=fixture();p.request(true);p.tick(false);

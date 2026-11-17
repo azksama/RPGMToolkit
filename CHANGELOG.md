@@ -1,5 +1,12 @@
 # Versions
 
+## 1.9.4 — Stabilité des changements de carte
+
+- Correction du plantage MZ `Cannot read properties of undefined (reading 'isClosing')` après un changement de carte.
+- Le module portrait attend le démarrage et l’activation de la scène avant de consulter ses fenêtres, sur MV comme sur MZ.
+- Aucun contrôle des fenêtres par le module portrait lorsqu’il est désactivé ou qu’aucun redimensionnement n’est nécessaire.
+- Tests de régression sur le plugin complet avec chargement différé des cartes, portrait activé et désactivé ; tests du contrôleur portrait inclus dans la suite principale.
+
 ## 1.9.3 — Accès au menu WOLF
 
 - Le bouton Toolbox de la bibliothèque ouvre directement le menu flottant, y compris après autorisation Android.

@@ -1,6 +1,6 @@
 /*:
  * @target MZ
- * @plugindesc v1.9.3 (MV/MZ) — Variables, inventaire, acteurs et traductions anglaises.
+ * @plugindesc v1.9.4 (MV/MZ) — Variables, inventaire, acteurs et traductions anglaises.
  * @author RPGM Toolkit
  *
  * @param Hotkey
@@ -34,7 +34,7 @@
  * @text Fermer le Toolkit
  *
  * @help
- * RPGM Toolkit 1.9.3 — RPG Maker MV 1.x / MZ
+ * RPGM Toolkit 1.9.4 — RPG Maker MV 1.x / MZ
  * Copiez ce fichier dans js/plugins, puis activez RPGMToolkit en dernier
  * dans le gestionnaire de plugins. Chargez une partie et appuyez sur F6.
  * Toolbox ouvre le menu global. Choisissez Éditeurs ou un outil de jeu.
@@ -796,10 +796,12 @@ function createToolkitPortrait(g, runtime) {
     }
     function safe() {
         var scene=manager && manager._scene;
-        return supported() && scene instanceof g.Scene_Map && !manager.isSceneChanging() &&
-            (!manager.isCurrentSceneStarted || manager.isCurrentSceneStarted()) &&
-            (!scene.isBusy || !scene.isBusy()) && (!scene.isActive || scene.isActive()) &&
-            g.$gamePlayer && !g.$gamePlayer.isTransferring() &&
+        if (!supported() || !(scene instanceof g.Scene_Map) || manager.isSceneChanging()) return false;
+        var started=typeof manager.isCurrentSceneStarted==='function' ? manager.isCurrentSceneStarted() :
+            typeof scene.isStarted==='function' && scene.isStarted();
+        if (!started || (typeof scene.isActive==='function' && !scene.isActive())) return false;
+        return (!scene.isBusy || !scene.isBusy()) &&
+            g.$gamePlayer && g.$gameMap && g.$gameMessage && !g.$gamePlayer.isTransferring() &&
             (!g.$gameMap.isEventRunning || !g.$gameMap.isEventRunning()) && !g.$gameMessage.isBusy();
     }
     function desiredSize() {
@@ -831,12 +833,13 @@ function createToolkitPortrait(g, runtime) {
         } else if (!value && locked && orientation && orientation.unlock) { orientation.unlock(); locked=false; }
     }
     function tick(opened) {
-        if (!supported() || opened || !safe()) return false;
+        if (!supported() || opened) return false;
         var wanted=!!runtime.prefs.settings.portrait;
-        setViewport(wanted);
-        var size=desiredSize();
         if (!wanted && !active) { dirty=false; return false; }
+        var size=desiredSize();
         if (wanted===active && (!dirty || (graphics.width===size.width && graphics.height===size.height))) { dirty=false; return false; }
+        if (!safe()) return false;
+        setViewport(wanted);
         if (!original) original={width:graphics.width,height:graphics.height,boxWidth:graphics.boxWidth,boxHeight:graphics.boxHeight,stretch:graphics._stretchEnabled,manager:{
             _screenWidth:manager._screenWidth,_screenHeight:manager._screenHeight,_boxWidth:manager._boxWidth,_boxHeight:manager._boxHeight
         }};
@@ -1581,7 +1584,7 @@ function closeToolkit() {
     if (previousFocus && document.contains(previousFocus)) previousFocus.focus();
 }
 function toggleToolkit() { return opened ? closeToolkit() : openToolkit(); }
-g.RPGMToolkit = { version: '1.9.3', open: openToolkit, close: closeToolkit, toggle: toggleToolkit, isOpen: function() { return opened; } };
+g.RPGMToolkit = { version: '1.9.4', open: openToolkit, close: closeToolkit, toggle: toggleToolkit, isOpen: function() { return opened; } };
 var heldCloseKey = null;
 g.addEventListener('keydown', function(event) {
     var key = event.key || ({ 117: 'F6', 118: 'F7', 121: 'F10', 27: 'Escape' }[event.keyCode]);
