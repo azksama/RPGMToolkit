@@ -7,7 +7,11 @@
 - 33 tests Rust de l’installateur, 10 tests Rust WOLF et 24 assertions PowerShell.
 - Les modules JavaScript et Ruby ont été comparés aux octets embarqués dans les trois bibliothèques de l’APK signé. Les fichiers de la WebView WOLF correspondent aux sources. Le certificat de signature correspond à celui de la 1.10.0.
 
-JoiPlay et Winlator sur téléphone, ainsi que le parcours Play Protect de cette préversion, restent à valider.
+Le 22 novembre 2026, le flux public `/releases/latest` renvoie `v1.11.0`. Sur un Android Emulator Google Play API 36.1, la version publiée 1.10.0 a téléchargé automatiquement l’APK signé et affiché « Toolkit 1.11.0 prêt à installer » dès l’accueil. Les réglages automatiques et Wi-Fi étaient ceux du premier lancement. [Capture de la 1.10.0](../docs/screenshots/1.11.0/update-ready.png).
+
+Après confirmation dans Android et analyse par Play Protect, l’émulateur a affiché « Harmful app blocked ». Le verdict du journal est `POTENTIALLY_UNWANTED` avec `threatType=generic_malware`. Android a conservé la version 1.10.0 (code 1010000). L’APK analysé porte l’empreinte SHA-256 `1c01892adf54c4c4d61c27750737add8197a1f3ea82a78835c8c564d4fa74dc8`. [Capture du verdict](../docs/screenshots/1.11.0/play-protect.png).
+
+Le comportement sur téléphone, y compris dans JoiPlay et Winlator, reste à vérifier.
 
 # Validation 1.10.0
 

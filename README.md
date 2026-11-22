@@ -2,7 +2,9 @@
 
 Mod intégré pour RPG Maker XP, VX, VX Ace, MV et MZ, éditeur WOLF pour Winlator et installateur Android **Rust + Tauri 2**, version **1.11.0**.
 
-La [préversion 1.11.0](https://github.com/azksama/RPGMToolkit/releases/tag/v1.11.0) ajoute **Toolbox → Équipements**. La version stable distribuée par l’updater est la 1.9.4. [Contrôle Play Protect de la 1.10.0](docs/validation/1.10.0-updater.md).
+La version stable 1.11.0 ajoute **Toolbox → Équipements**. Depuis la 1.10.0, ouvrez **Réglages → Application → Vérifier** pour la voir. La mise à jour automatique a été introduite en 1.10.0. [Notes de version](https://github.com/azksama/RPGMToolkit/releases/tag/v1.11.0).
+
+**Installation Android.** Lors du test, la 1.10.0 a téléchargé la 1.11.0 automatiquement. Google Play Protect a ensuite bloqué l’installation après analyse. Si Android affiche cette alerte, conservez la version installée. [Résultat du test](android/VALIDATION.md#validation-1110).
 
 Le [guide WOLF](wolf/README.md) décrit le menu flottant, les profils d’objets/HP/stats et les formats pris en charge. Les dossiers RPG Maker peuvent contenir directement `js/` et `data/`, sans `www/`, ou se trouver dans des sous-dossiers comme `Data/`.
 
