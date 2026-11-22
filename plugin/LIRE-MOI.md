@@ -36,7 +36,7 @@ Cette procédure suit le [fonctionnement officiel du gestionnaire de plugins](ht
 | Interrupteurs | Activation/désactivation des interrupteurs globaux |
 | Interrupteurs locaux | A/B/C/D des événements de la carte courante |
 | Objets | Objets usuels, objets clés et masqués ; quantité exacte, +1, +10, −1 |
-| Armes et armures | Inventaire, prix, bonus de statistiques, équipement d’un acteur |
+| Armes et armures | Quantités du sac, prix, comparaison des paramètres, ajout et retrait par emplacement |
 | Acteurs | HP, MP, TP, niveau, EXP, soins complets, retrait d’équipement |
 | Compétences | Recherche, apprentissage, oubli pour l’acteur sélectionné |
 | États | Recherche, ajout, retrait pour l’acteur sélectionné |

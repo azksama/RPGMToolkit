@@ -93,7 +93,40 @@ class Game_Battler
   define_method(:def) { 10 }
   define_method(:def=) { |v| }
 end
-class Game_Actor < Game_Battler; end
+class Game_Actor < Game_Battler
+  attr_accessor :locked,:refuse,:dual
+  def equips; @equips ||= Array.new(5); end
+  def equip_slots; [0,(@dual || (ENGINE==3 && equips[0] && equips[0].grants_dual)) ? 0 : 1,2,3,4]; end
+  def two_swords_style; @dual; end
+  def equip_fix?(slot); @locked; end
+  def fix_equipment; @locked; end
+  def equip_change_ok?(slot); !@locked; end
+  def equippable?(o); o && o.name!='Restricted'; end
+  [:weapon_id,:armor1_id,:armor2_id,:armor3_id,:armor4_id].each_with_index { |m,i| define_method(m) { equips[i] ? equips[i].id : 0 } }
+  def equip(slot,id)
+    change_native(slot,id==0 ? nil : (slot==0 ? $data_weapons : $data_armors)[id])
+  end
+  def change_equip(slot,item); change_native(slot,item); end
+  def change_native(slot,item)
+    return if @refuse
+    previous=equips[slot]
+    [[previous,1],[item,-1]].each do |o,delta|
+      next unless o
+      if ENGINE==1
+        $data_weapons[o.id].equal?(o) ? $game_party.gain_weapon(o.id,delta) : $game_party.gain_armor(o.id,delta)
+      else
+        $game_party.gain_item(o,delta)
+      end
+    end
+    equips[slot]=item
+    if ENGINE==2 && slot<2 && item && equips[1-slot] && [item,equips[1-slot]].any? { |o| o.two_handed }
+      change_native(1-slot,nil)
+    end
+    if ENGINE==3 && equips[1] && equips[1].etype_id!=equip_slots[1]
+      change_native(1,nil)
+    end
+  end
+end
 class Game_Enemy < Game_Battler; end
 if ENGINE<3
   Game_Battler.class_eval do
@@ -108,19 +141,19 @@ class Party
   def initialize; @gold=100; @items={}; end
   def members; [$game_actors[1]]; end
   alias actors members
-  def item_number(item); @items.fetch(item.is_a?(Integer) ? item : item.id,0); end
-  alias weapon_number item_number
-  alias armor_number item_number
-  def gain_item(item,n); id=item.is_a?(Integer) ? item : item.id; @items[id]=[[item_number(item)+n,0].max,99].min; end
-  alias gain_weapon gain_item
-  alias gain_armor gain_item
+  def item_number(item); @items.fetch(item,0); end
+  def weapon_number(id); item_number([:weapon,id]); end
+  def armor_number(id); item_number([:armor,id]); end
+  def gain_item(item,n); @items[item]=[[item_number(item)+n,0].max,99].min; end
+  def gain_weapon(id,n); gain_item([:weapon,id],n); end
+  def gain_armor(id,n); gain_item([:armor,id],n); end
   def gain_gold(n); @gold+=n; end
 end
-Record=Struct.new(:id,:name,:icon_index,:icon_name)
+Record=Struct.new(:id,:name,:icon_index,:icon_name,:kind,:etype_id,:two_handed,:grants_dual)
 $data_system=Struct.new(:variables,:switches).new(['']+(1..200).map { |i| 'Variable '+i.to_s },['','Switch'])
 $data_items=[nil,Record.new(1,'Potion',1,'potion')]
-$data_weapons=[nil,Record.new(1,'Sword',2,'sword')]
-$data_armors=[nil,Record.new(1,'Armor',3,'armor')]
+$data_weapons=[nil,Record.new(1,'Sword',2,'sword',nil,0,false),Record.new(2,'Greatsword',0,'',nil,0,true,true),Record.new(3,'Restricted',0,'',nil,0,false)]
+$data_armors=[nil,Record.new(1,'Shield',3,'shield',0,1,false)]
 $data_actors=[nil,Record.new(1,'Actor',0,'')]
 $data_skills=[nil,Record.new(1,'Fire',4,'fire')]
 $data_states=[nil,Record.new(1,'KO',5,'state')]
@@ -147,6 +180,29 @@ Dir.mktmpdir('rgss-test') do |dir|
   switch=RPGMToolkit.records(:switches)[0]; RPGMToolkit.assign(switch,true); check($game_switches[1],'switch')
   local=RPGMToolkit.records(:self_switches)[0]; RPGMToolkit.assign(local,true); check($game_self_switches[local[1]],'local switch')
   [:items,:weapons,:armors].each { |c| item=RPGMToolkit.records(c)[0]; RPGMToolkit.assign(item,5); check(RPGMToolkit.value(item)==5,'inventory '+c.to_s) }
+  sword,greatsword,restricted=RPGMToolkit.records(:weapons)
+  shield=RPGMToolkit.records(:armors).first
+  a=$game_actors[1]
+  check(!RPGMToolkit.gear_fits?(a,0,shield) && !RPGMToolkit.gear_fits?(a,0,restricted),'class and slot restrictions')
+  RPGMToolkit.equip_gear(a,0,sword)
+  check(RPGMToolkit.value(sword)==4 && RPGMToolkit.worn_gear(a)[0]==sword[3],'equip from bag')
+  check(!RPGMToolkit.equip_gear(a,0,sword,true) && RPGMToolkit.value(sword)==4,'idempotent equip')
+  a.locked=true
+  begin; RPGMToolkit.equip_gear(a,0,nil); raise 'lock ignored'; rescue RuntimeError => e; check(e.message==RPGMToolkit.t(:locked),'equipment lock'); end
+  a.locked=false; a.refuse=true
+  begin; RPGMToolkit.equip_gear(a,0,greatsword,true); raise 'refusal ignored'; rescue RuntimeError => e; check(e.message==RPGMToolkit.t(:gear_denied),'gear refusal'); end
+  check(RPGMToolkit.value(greatsword)==0 && RPGMToolkit.value(sword)==4,'refund on refusal')
+  a.refuse=false; RPGMToolkit.equip_gear(a,1,shield)
+  if ENGINE>=2
+    RPGMToolkit.assign(shield,99)
+    begin; RPGMToolkit.equip_gear(a,0,greatsword,true); raise 'lost shield'; rescue RuntimeError => e; check(e.message==RPGMToolkit.t(:full_bag),'two-handed overflow'); end
+    RPGMToolkit.assign(shield,4)
+  end
+  RPGMToolkit.equip_gear(a,0,greatsword,true)
+  check(RPGMToolkit.value(sword)==5 && RPGMToolkit.value(greatsword)==0 && RPGMToolkit.worn_gear(a)[0]==greatsword[3],'create and swap')
+  check(RPGMToolkit.value(shield)==5 && RPGMToolkit.worn_gear(a)[1].nil?,'off-hand shield return') if ENGINE>=2
+  RPGMToolkit.equip_gear(a,0,nil)
+  check(RPGMToolkit.value(greatsword)==1 && RPGMToolkit.worn_gear(a)[0].nil?,'unequip returns exactly one')
   skill=RPGMToolkit.records(:skills)[0]; RPGMToolkit.assign(skill,true); check(RPGMToolkit.value(skill),'skill')
   RPGMToolkit.assign(skill,false); check(!RPGMToolkit.value(skill),'forget skill')
   RPGMToolkit.god=true; $game_actors[1].hp=0; $game_actors[1].add_state(1); check($game_actors[1].hp==100&&!$game_actors[1].state?(1),'godmode')
@@ -156,7 +212,24 @@ Dir.mktmpdir('rgss-test') do |dir|
   RPGMToolkit.instance_variable_set(:@prefs,nil); check(RPGMToolkit.name(r)=='English name','persistent alias')
   RPGMToolkit.export_aliases; RPGMToolkit.prefs['aliases']={}; RPGMToolkit.import_aliases; check(RPGMToolkit.name(r)=='English name','TSV import')
   ui=RPGMToolkit::UI.new
-  [:home,:editors,:resources,:stats,:party,:teleport,:history,:translations,:settings].each do |mode|
+  gear_ui=RPGMToolkit::UI.new
+  class << gear_ui
+    attr_reader :actions
+    alias stock_row row
+    def row(label,description=nil,&action)
+      (@actions ||= {})[label]=action
+      stock_row(label,description,&action)
+    end
+  end
+  gear_ui.mode(:equipment); gear_ui.draw
+  gear_ui.actions['1  Arme'].call; gear_ui.draw
+  gear_ui.actions.find { |k,v| k.start_with?('#1  Sword') }.last.call; gear_ui.draw
+  gear_ui.actions[RPGMToolkit.t(:equip)].call; gear_ui.draw
+  check(RPGMToolkit.worn_gear(a)[0]==sword[3],'equipment menu applies selection')
+  gear_ui.actions[RPGMToolkit.t(:remove_gear)].call
+  gear_ui.back; gear_ui.draw
+  check(gear_ui.instance_variable_get(:@mode)==:equipment && RPGMToolkit.worn_gear(a)[0].nil?,'equipment menu returns to actor slots')
+  [:home,:editors,:equipment,:resources,:stats,:party,:teleport,:history,:translations,:settings].each do |mode|
     ui.mode(mode); ui.draw
     ui.instance_variable_get(:@buttons).each { |b| check(b[0]>=0&&b[1]>=0&&b[0]+b[2]<=WIDTH&&b[1]+b[3]<=HEIGHT,'clipped button '+mode.to_s) }
   end

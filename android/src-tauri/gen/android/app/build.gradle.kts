@@ -16,6 +16,7 @@ val tauriProperties = Properties().apply {
 android {
     compileSdk = 36
     namespace = "fr.azk.rpgmtoolkit"
+    sourceSets.getByName("androidTest").assets.srcDir("../../../../../plugin/demo")
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
         applicationId = "fr.azk.rpgmtoolkit"

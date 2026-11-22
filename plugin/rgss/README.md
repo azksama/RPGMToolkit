@@ -1,4 +1,4 @@
-# RPGM Toolkit RGSS — 1.7.0
+# RPGM Toolkit RGSS — 1.11.0
 
 | Moteur | Scripts | Archive standard |
 | --- | --- | --- |
@@ -17,6 +17,8 @@ Pour un projet éditable sur ordinateur, ajouter le contenu de `RPGMToolkit.rb` 
 F6 ouvre Toolbox. Les flèches et Entrée naviguent ; Échap revient au menu parent. L/R font défiler. Le bouton supérieur gauche, le glissement et la barre de défilement utilisent les extensions souris du runtime lorsqu’elles existent. Un runtime sans ces extensions nécessite les commandes clavier, notamment via les boutons virtuels de JoiPlay.
 
 Variables, interrupteurs, interrupteurs locaux, objets, armes, armures, acteurs, compétences et états sont disponibles. Les outils incluent Godmode, No Clip, HP/MP, statistiques, ennemis en combat, téléportation, or et sauvegarde. Les limites de valeurs du jeu restent applicables.
+
+Dans **Toolbox → Équipements**, choisissez un personnage, puis un emplacement. Vous pouvez chercher une pièce par nom ou `#ID`, filtrer le sac, créer une pièce ou retirer celle qui est portée. La sauvegarde normale du jeu conserve l’équipement.
 
 ## Traductions
 

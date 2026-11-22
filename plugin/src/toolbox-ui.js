@@ -21,11 +21,13 @@ function installToolboxUI() {
     var close = document.createElement('button'); close.type = 'button'; close.textContent = '✕'; close.className = 'rt-close'; close.dataset.action = 'modal-dismiss'; close.setAttribute('aria-label','Fermer la fenêtre'); header.insertBefore(close,header.firstChild);
     root.addEventListener('change', function(event) {
         guarded(function() {
+            gearInput(event);
             if (event.target.id === 'rt-tool-actor' || event.target.id === 'rt-tool-param') updateToolValues();
             if (event.target.id === 'rt-tool-map') loadToolMap();
         });
     });
     root.addEventListener('input', function(event) {
+        gearInput(event);
         if (event.target.id === 'rt-map-query') { renderToolMaps(event.target.value); loadToolMap(); }
     });
     if (g.MutationObserver) new g.MutationObserver(fitToolboxModal).observe($('.rt-modal'),{childList:true,subtree:true,characterData:true});
@@ -35,6 +37,7 @@ function showToolboxHome() {
     var state = gameTools.state();
     var entries = [
         ['editors','Éditeurs','Variables, objets, armes, armures…'],
+        ['equipment','Équipements','Armes et armures par personnage'],
         ['translations','Traductions','Noms anglais · tout traduire et reprendre'],
         ['god','Godmode','HP au maximum · protection contre K.O.'],
         ['noclip','No Clip','Traverser les obstacles de la carte'],
@@ -122,6 +125,7 @@ function toolboxAction(action, node) {
     if (mode === 'close') closeToolkit();
     else if (mode === 'god' || mode === 'noclip') { if (mode === 'god') gameTools.setGod(!gameTools.state().god); else gameTools.setNoclip(!gameTools.state().noclip); node.setAttribute('aria-checked', String(gameTools.state()[mode])); }
     else if (mode === 'home') showToolboxHome();
+    else if (mode === 'equipment') openGear(null, null);
     else if (mode === 'editors') { toolboxHome = false; root.classList.remove('rt-home-open'); render(); $('.rt-panel').focus(); }
     else if (mode === 'place-go') visitPlace(node.getAttribute('data-place'));
     else if (mode === 'place-delete') { gameTools.travel.forget(Number(node.getAttribute('data-place'))); renderPlaces(); }

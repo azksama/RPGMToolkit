@@ -13,6 +13,12 @@ Sur une carte ou un combat chargé, **Toolbox** (en haut à gauche) ou F6 ouvre 
 
 Godmode et No Clip restent actifs quand on ferme le panneau, mais se désactivent au chargement d’une partie. HP/MP, statistiques et déplacement sont conservés par la sauvegarde normale du jeu. Ces nouvelles commandes ne font pas partie de la pile d’annulation des éditeurs.
 
+## Équipements
+
+Dans **Toolbox → Équipements**, choisissez le personnage et son emplacement. **Équiper** utilise un exemplaire du sac. **Créer et équiper** en fournit un si le stock est vide. **Déséquiper** remet la pièce portée dans le sac. Les commandes **+1** et **−1** ajustent le stock. Enregistrez la partie pour conserver les changements.
+
+La recherche accepte le nom ou `#ID`. Le filtre de stock affiche les pièces disponibles. Sur MV/MZ, les écarts de paramètres comparent la pièce proposée à la pièce portée. Le jeu détermine les emplacements et les objets autorisés pour chaque personnage.
+
 ## Traduction et conservation
 
 MyMemory reçoit uniquement les noms, jamais les valeurs des variables. Les demandes sont explicites, avec trois requêtes simultanées au maximum. Les noms identiques sont regroupés dans une opération, et les alias existants sont ignorés. La limite du service reste de 500 octets par nom ; un nom trop long doit recevoir un alias manuel avant de relancer l’opération. Le quota et la vitesse du service restent indépendants du Toolkit.

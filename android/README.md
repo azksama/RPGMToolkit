@@ -1,4 +1,4 @@
-# RPGM Toolkit Android — 1.10.0
+# RPGM Toolkit Android — 1.11.0
 
 Application Android Rust + Tauri 2, interface React/TypeScript, accès aux fichiers par un plugin Kotlin Storage Access Framework. Les modules MV/MZ `RPGMToolkit.js` et XP/VX/VX Ace `RPGMToolkit.rb` sont embarqués dans la bibliothèque Rust.
 
@@ -87,7 +87,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib --locked
 
 Application indépendante de RPG Maker et de JoiPlay. Voir le rapport de validation livré pour distinguer les tests automatisés, les essais sur émulateur et la validation sur un jeu réel.
 
-La sélection de dossiers accepte une bibliothèque contenant plusieurs jeux et des ajouts successifs de dossiers. Le mod MV/MZ embarqué est en version 1.10.0. Voir le guide bibliothèque du README principal.
+La sélection de dossiers accepte une bibliothèque contenant plusieurs jeux et des ajouts successifs de dossiers. Le mod MV/MZ embarqué est en version 1.11.0. Voir le guide bibliothèque du README principal.
 
 
 ## WOLF / Winlator

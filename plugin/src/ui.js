@@ -7,7 +7,7 @@ var portraitMode, gameTools, runtime, translator, root, launch, previousFocus, o
 var opened = false, dirty = false, tab = 'variables', query = '', filter = 'all', page = 0, selected = null, found = [];
 var chosenActor = '', checked = {}, modalMode = '', modalFocus = null, exactValue = '';
 function picked() { return Object.keys(checked).map(function(k) { return checked[k]; }); }
-var labels = { favorites: 'Favoris', variables: 'Variables', switches: 'Interrupteurs', selfSwitches: 'Interr. locaux', items: 'Objets', weapons: 'Armes', armors: 'Armures', actors: 'Acteurs', skills: 'Compétences', states: 'États', strings: 'Textes', database: 'Base variable', resources: 'HP / MP', stats: 'Stats', party: 'Partie', translations: 'Traductions', history: 'Historique' };
+var labels = { favorites: 'Favoris', variables: 'Variables', switches: 'Interrupteurs', selfSwitches: 'Interr. locaux', items: 'Objets', weapons: 'Armes', armors: 'Armures', actors: 'Acteurs', skills: 'Compétences', states: 'États', strings: 'Textes', database: 'Base variable', gearSlots: 'Emplacements équipés', resources: 'HP / MP', stats: 'Stats', party: 'Partie', translations: 'Traductions', history: 'Historique' };
 function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function(c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 function $(selector) { return root.querySelector(selector); }
 function button(text, action, cls) { return '<button type="button" data-action="' + action + '" class="' + (cls || '') + '">' + text + '</button>'; }
@@ -104,7 +104,8 @@ function buildRoot() {
     });
 }
 function renderNav() {
-    $('#rt-category').innerHTML = (toolkitHost ? ['favorites'].concat(runtime.kinds) : Object.keys(labels).filter(function(k) { return k !== 'translations'; })).map(function(k) { return '<option value="' + k + '">' + esc(labels[k]) + '</option>'; }).join('');
+    var tabs = toolkitHost ? ['favorites'].concat(runtime.kinds) : ['favorites','variables','switches','selfSwitches','items','weapons','armors','actors','skills','states','party','history'];
+    $('#rt-category').innerHTML = tabs.map(function(k) { return '<option value="' + k + '">' + esc(labels[k]) + '</option>'; }).join('');
     $('#rt-category').value = tab;
 }
 function render() {
@@ -118,6 +119,15 @@ function openModal(mode, title) {
 }
 function closeModal() {
     if (!modalMode) return;
+    var backToGearEntry = opened && modalMode === 'equipment' && gearView && gearView.fromEditor && selected;
+    clearTimeout(gearTimer);
+    gearView = null;
+    if (backToGearEntry) {
+        openModal('edit', 'Éditer · #' + selected.id);
+        $('.rt-modal-content').innerHTML = '<div class="rt-detail"></div>';
+        renderDetail();
+        return;
+    }
     toolboxMapToken++; modalMode = ''; $('.rt-modal').hidden = true; $('.rt-panel').removeAttribute('aria-hidden'); $('.rt-panel').inert = false;
     if (opened) { if (toolboxHome) showToolboxHome(); else renderList(); }
     if (modalFocus && document.contains(modalFocus)) modalFocus.focus(); else $('.rt-panel').focus();
@@ -163,10 +173,10 @@ function renderList() {
     updateSelection(); paintIcons();
     if (toolkitHost) toolkitHost.visible(rows);
 }
-function paintIcons() {
+function paintIcons(container) {
     if (!g.ImageManager || !g.ImageManager.loadSystem) return;
     var bitmap = g.ImageManager.loadSystem('IconSet');
-    var canvases = Array.prototype.slice.call(root.querySelectorAll('canvas[data-icon]'));
+    var canvases = Array.prototype.slice.call((container || root).querySelectorAll('canvas[data-icon]'));
     bitmap.addLoadListener(function() {
         var size = g.ImageManager.iconWidth || (g.Window_Base && g.Window_Base._iconWidth) || 32;
         canvases.forEach(function(canvas) {
@@ -188,7 +198,7 @@ function renderDetail() {
     if (r.data && r.data.description) html += '<p class="rt-small" data-game-text>' + esc(r.data.description) + '</p>';
     html += '<div class="rt-divider"></div>';
     if (toolkitHost) {
-        html += runtime.editable(r) ? valueForm(v, 'variable') : '<p class="rt-muted">…</p>';
+        html += runtime.editable(r) ? valueForm(v, 'variable') : '<div data-wolf-pending-value class="rt-muted">…</div>';
         html += button('Profil', 'wolf-profile');
     } else if (kind === 'variables') {
         if (runtime.editable(r)) html += valueForm(v, 'variable');
@@ -199,15 +209,17 @@ function renderDetail() {
         html += '<p class="rt-muted rt-small">Prix : ' + esc(r.data.price) + ' ' + esc(g.$dataSystem.currencyUnit) + (r.data.itypeId === 2 ? ' · Objet clé' : '') + '</p>';
         if (r.data.params) html += '<p class="rt-small">' + ['HP', 'MP', 'ATK', 'DEF', 'MAT', 'MDF', 'AGI', 'LUK'].map(function(name, i) { return r.data.params[i] ? name + ' ' + (r.data.params[i] > 0 ? '+' : '') + r.data.params[i] : ''; }).filter(Boolean).join(' · ') + '</p>';
         html += '<form data-form="quantity">' + field('Quantité dans le sac / maximum ' + g.$gameParty.maxItems(r.data), 'rt-quantity', v, 'number', 'min="0" max="' + g.$gameParty.maxItems(r.data) + '" step="1" required') + '<button class="rt-primary rt-full" type="submit">Définir la quantité</button></form><div class="rt-actions" style="margin-top:10px">' + button('+1', 'give-one') + button('+10', 'give-ten') + button('−1', 'take-one') + '</div>';
-        if (kind !== 'items') html += '<div class="rt-divider"></div>' + actorTarget() + field('Emplacement (1 = premier emplacement)', 'rt-equip-slot', 1, 'number', 'min="1" step="1" required') + button('Équiper depuis le sac', 'equip', 'rt-full');
+        if (kind !== 'items') html += '<div class="rt-divider"></div>' + actorTarget() + button('Gérer l’équipement', 'open-gear', 'rt-full');
     } else if (kind === 'actors') html += actorEditor(r);
     else if (kind === 'skills' || kind === 'states') html += actorTarget() + '<div class="rt-actions">' + button(kind === 'skills' ? 'Apprendre' : 'Ajouter l’état', kind === 'skills' ? 'learn' : 'add-state', 'rt-primary') + button(kind === 'skills' ? 'Oublier' : 'Retirer l’état', kind === 'skills' ? 'forget' : 'remove-state') + '</div>';
     html += '<div class="rt-divider"></div><form data-form="alias">' + field('Nom anglais · affichage uniquement', 'rt-alias', runtime.alias(r), 'text', 'maxlength="2000" placeholder="Saisir une traduction…"') + '<div class="rt-actions"><button type="submit">Enregistrer le nom</button>' + button('Traduire en ligne', 'translate-one') + '</div></form>';
     detail.innerHTML = html;
-    if (toolkitHost && $('#rt-value-type')) {
-        Array.prototype.forEach.call($('#rt-value-type').options,function(option){option.disabled=r.data.string ? option.value!=='string' : option.value==='string';});
-    }
+    if (toolkitHost) restrictWolfValueType(r);
     updateValueInput(); renderActorContext();
+}
+function restrictWolfValueType(r) {
+    var type = $('#rt-value-type');
+    if (type) Array.prototype.forEach.call(type.options,function(option){option.disabled=r.data.string ? option.value!=='string' : option.value==='string';});
 }
 
 function valueForm(value, form) {
@@ -228,7 +240,7 @@ function actorEditor(r) {
     var a = runtime.actor(r.id), html = '<p class="rt-muted rt-small">Nom en partie : ' + esc(a.name()) + '</p>';
     html += '<form data-form="actor-stat"><label class="rt-field"><span>Statistique à modifier</span><select id="rt-stat"><option value="hp">HP · ' + a.hp + '/' + a.mhp + '</option><option value="mp">MP · ' + a.mp + '/' + a.mmp + '</option><option value="tp">TP · ' + a.tp + '/' + a.maxTp() + '</option><option value="level">Niveau · ' + a.level + '/' + a.maxLevel() + '</option><option value="exp">EXP · ' + a.currentExp() + '</option></select></label>' + field('Nouvelle valeur', 'rt-stat-value', a.hp, 'number', 'min="0" step="1" required') + '<button type="submit" class="rt-primary rt-full">Appliquer à cet acteur</button></form>' + button('Soigner complètement', 'recover', 'rt-full') + '<h4>Équipement porté</h4>';
     a.equips().forEach(function(item, i) { html += '<p class="rt-small">' + (i + 1) + '. ' + esc(item && item.name || 'Vide') + (item ? ' <button type="button" data-action="unequip" data-slot="' + i + '">Retirer</button>' : '') + '</p>'; });
-    html += '';
+    html += button('Gérer l’équipement', 'open-gear', 'rt-full');
     return html;
 }
 function renderActorContext() {
@@ -236,7 +248,7 @@ function renderActorContext() {
     var a = runtime.actor(Number($('#rt-actor-target').value)), text;
     if (selected.kind === 'skills') text = a.isLearnedSkill(selected.id) ? 'Compétence déjà apprise.' : 'Compétence non apprise.';
     else if (selected.kind === 'states') text = a.isStateAffected(selected.id) ? 'État actuellement actif.' : 'État actuellement absent.';
-    else text = a.equipSlots().map(function(type, i) { return (i + 1) + ' : ' + (g.$dataSystem.equipTypes[type] || type); }).join(' · ');
+    else text = a.equips().filter(function(item) { return item === selected.data; }).length ? 'Équipé' : '';
     $('#rt-actor-context').textContent = text;
 }
 function renderParty() {
@@ -321,6 +333,12 @@ function importFile(file) {
 }
 function act(action, node) {
     if (toolboxAction(action, node)) return;
+    if (action.indexOf('gear-') === 0) { gearAction(action.slice(5), node); return; }
+    if (action === 'open-gear') {
+        if (selected.kind === 'actors') openGear(selected.id, null);
+        else openGear(Number($('#rt-actor-target').value), selected);
+        return;
+    }
     var r, id;
     if (action === 'modal-close' || action === 'modal-dismiss' || action === 'back-results') { closeModal(); return; }
     if (action === 'select') { selected = found[Number(node.getAttribute('data-index'))]; openModal('edit', 'Éditer · #' + selected.id); $('.rt-modal-content').innerHTML = '<div class="rt-detail"></div>'; renderDetail(); return; }
@@ -363,10 +381,9 @@ function act(action, node) {
     if (/^(give-one|give-ten|take-one)$/.test(action)) { var delta = action === 'give-ten' ? 10 : (action === 'give-one' ? 1 : -1); runtime.setValue(selected, Math.max(0, Math.min(g.$gameParty.maxItems(selected.data), runtime.value(selected) + delta))); changed('Quantité actuelle : ' + runtime.value(selected) + '.'); return; }
     if (action === 'recover') { runtime.actorAction(selected.id, 'recover'); changed('Acteur soigné.', true); return; }
     if (action === 'unequip') { runtime.equip(selected.id, Number(node.getAttribute('data-slot')), null); changed('Équipement retiré.', true); return; }
-    if (/^(learn|forget|add-state|remove-state|equip)$/.test(action)) {
+    if (/^(learn|forget|add-state|remove-state)$/.test(action)) {
         id = Number($('#rt-actor-target').value);
-        if (action === 'equip') runtime.equip(id, runtime.integer($('#rt-equip-slot').value, 1, 99) - 1, selected);
-        else runtime.actorAction(id, { learn: 'learn', forget: 'forget', 'add-state': 'addState', 'remove-state': 'removeState' }[action], selected.id);
+        runtime.actorAction(id, { learn: 'learn', forget: 'forget', 'add-state': 'addState', 'remove-state': 'removeState' }[action], selected.id);
         changed('Commande appliquée. Consultez l’état actuel de l’acteur.', true);
     }
 }
@@ -421,7 +438,7 @@ function closeToolkit() {
     if (previousFocus && document.contains(previousFocus)) previousFocus.focus();
 }
 function toggleToolkit() { return opened ? closeToolkit() : openToolkit(); }
-g.RPGMToolkit = { version: '1.10.0', open: openToolkit, close: closeToolkit, toggle: toggleToolkit, isOpen: function() { return opened; } };
+g.RPGMToolkit = { version: '1.11.0', open: openToolkit, close: closeToolkit, toggle: toggleToolkit, isOpen: function() { return opened; } };
 var heldCloseKey = null;
 g.addEventListener('keydown', function(event) {
     var key = event.key || ({ 117: 'F6', 118: 'F7', 121: 'F10', 27: 'Escape' }[event.keyCode]);
@@ -469,7 +486,18 @@ g.SceneManager.updateScene = function() {
 };
 }
 if (toolkitHost) {
-    toolkitHost.attach({ open:openToolkit, refresh:function(){ if(opened){var list=$('.rt-list'), scroll=list?list.scrollTop:0;renderList();if(list)list.scrollTop=scroll; if(modalMode==='edit' && selected && !$('.rt-modal').contains(document.activeElement))renderDetail();} }, status:say, modal:openModal, content:function(html){$('.rt-modal-content').innerHTML=html;}, record:function(){return selected;}, edit:function(record){selected=record;openModal('edit','Édition');$('.rt-modal-content').innerHTML='<section class="rt-detail"></section>';renderDetail();}, runtime:function(){return runtime;}, history:function(){runtime.clearHistory();}, home:showToolboxHome, render:function(){runtime.refresh();renderNav();renderList();}, settings:renderSettings });
+    toolkitHost.attach({ open:openToolkit, refresh:refreshWolfView, status:say, modal:openModal, content:function(html){$('.rt-modal-content').innerHTML=html;}, record:function(){return selected;}, edit:function(record){selected=record;openModal('edit','Édition');$('.rt-modal-content').innerHTML='<section class="rt-detail"></section>';renderDetail();}, runtime:function(){return runtime;}, history:function(){runtime.clearHistory();}, home:showToolboxHome, render:function(){runtime.refresh();renderNav();renderList();}, settings:renderSettings });
+}
+function refreshWolfView() {
+    if (!opened) return;
+    var list = $('.rt-list'), scroll = list.scrollTop;
+    renderList(); list.scrollTop = scroll;
+    if (modalMode !== 'edit' || !selected) return;
+    var pending = $('[data-wolf-pending-value]');
+    if (pending && runtime.editable(selected)) {
+        pending.outerHTML = valueForm(runtime.value(selected), 'variable');
+        restrictWolfValueType(selected); updateValueInput();
+    } else if (!$('.rt-modal').contains(document.activeElement)) renderDetail();
 }
 function openFromInterpreter() { if (openToolkit() && this && this.setWaitMode) this.setWaitMode('rpgmToolkit'); }
 if (g.PluginManager && g.PluginManager.registerCommand) { g.PluginManager.registerCommand('RPGMToolkit', 'Open', openFromInterpreter); g.PluginManager.registerCommand('RPGMToolkit', 'Close', closeToolkit); }

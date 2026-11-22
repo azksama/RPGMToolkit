@@ -1,5 +1,11 @@
 # Versions
 
+## 1.11.0 — Équipements
+
+- Équiper et déséquiper les membres de l’équipe sur XP, VX, VX Ace, MV et MZ. Rechercher une arme ou une armure compatible, en créer un exemplaire ou modifier le stock.
+- Sur MV/MZ, le sélecteur utilise les noms d’emplacements du jeu et compare les paramètres de base des équipements.
+- Sur WOLF, le profil peut associer les champs de stock et les emplacements portés à leurs identifiants en jeu.
+
 ## 1.10.0 — Préversion : installateur, compatibilité et mises à jour
 
 Distribution stable suspendue après une alerte Play Protect sur l’émulateur. Voir le [contrôle de l’updater](docs/validation/1.10.0-updater.md).

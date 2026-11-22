@@ -1,6 +1,6 @@
 /*:
  * @target MZ
- * @plugindesc v1.10.0 (MV/MZ) — Variables, inventaire, acteurs et traductions anglaises.
+ * @plugindesc v1.11.0 (MV/MZ) — Variables, inventaire, acteurs et traductions anglaises.
  * @author RPGM Toolkit
  *
  * @param Hotkey
@@ -34,7 +34,7 @@
  * @text Fermer le Toolkit
  *
  * @help
- * RPGM Toolkit 1.10.0 — RPG Maker MV 1.x / MZ
+ * RPGM Toolkit 1.11.0 — RPG Maker MV 1.x / MZ
  * Copiez ce fichier dans js/plugins, puis activez RPGMToolkit en dernier
  * dans le gestionnaire de plugins. Chargez une partie et appuyez sur F6.
  * Toolbox ouvre le menu global. Choisissez Éditeurs ou un outil de jeu.
@@ -378,20 +378,83 @@ function createToolkitRuntime(g, storage) {
         note(a.name() + ' · ' + label, old, n, false);
         return a;
     }
-    function equip(id, slot, record) {
-        if (g.$gameParty.inBattle()) throw new Error('Équipement disponible hors combat.');
-        var a = actor(id), slots = a.equipSlots();
-        slot = integer(slot, 0, slots.length - 1);
-        var item = record ? record.data : null;
-        if (!a.isEquipChangeOk(slot)) throw new Error('Cet emplacement est verrouillé par le jeu.');
-        if (record) {
-            assertRecord(record);
-            if (!/^(weapons|armors)$/.test(record.kind) || slots[slot] !== item.etypeId || !a.canEquip(item)) throw new Error('Cet équipement ne convient pas à cet acteur ou à cet emplacement.');
-            if (!g.$gameParty.hasItem(item, false)) throw new Error('Ajoutez cet équipement à l’inventaire avant de l’équiper.');
+    function gearRecord(item) {
+        if (!item) return null;
+        if (g.$dataWeapons[item.id] === item) return record('weapons', item.id);
+        if (g.$dataArmors[item.id] === item) return record('armors', item.id);
+        return null;
+    }
+    function gearFits(a, type, r) {
+        return (r.kind === 'weapons' || r.kind === 'armors') && r.data.etypeId === type && a.canEquip(r.data);
+    }
+    function checkGearReturns(a, before, slot, item) {
+        var planned = before.slice(), preview = Object.create(a);
+        planned[slot] = item;
+        if (a.releaseUnequippableItems) {
+            preview.equips = function() { return planned.slice(); };
+            var changed;
+            do {
+                changed = false;
+                var types = preview.equipSlots();
+                planned.forEach(function(piece, i) {
+                    if (piece && (piece.etypeId !== types[i] || !preview.canEquip(piece))) {
+                        planned[i] = null;
+                        changed = true;
+                    }
+                });
+            } while (changed);
+            if (planned[slot] !== item) throw new Error('Le moteur a refusé cet équipement.');
         }
-        var old = a.equips()[slot]; a.changeEquip(slot, item);
-        if (a.equips()[slot] !== item) throw new Error('Le moteur a refusé cet équipement.');
+        var returned = [];
+        before.forEach(function(piece, i) {
+            if (!piece || piece === planned[i]) return;
+            var record = gearRecord(piece);
+            if (record && frozen[record.key]) throw new Error('Libérez la quantité figée avant cet échange.');
+            returned.push(piece);
+            var copies = returned.filter(function(o) { return o === piece; }).length;
+            var count = g.$gameParty.numItems(piece);
+            if (piece === item) count = Math.max(0, count - 1);
+            if (count + copies > g.$gameParty.maxItems(piece)) throw new Error('Le sac est plein pour l’équipement à retirer.');
+        });
+    }
+    function equip(id, slot, entry, grantMissing) {
+        ensureSession();
+        if (g.$gameParty.inBattle()) throw new Error('Équipement disponible hors combat.');
+        var party = g.$gameParty, a = actor(id), slots = a.equipSlots();
+        slot = integer(slot, 0, slots.length - 1);
+        var before = a.equips().slice(), old = before[slot] || null;
+        var item = entry ? entry.data : null;
+        if (!a.isEquipChangeOk(slot)) throw new Error('Cet emplacement est verrouillé par le jeu.');
+        if (entry) {
+            assertRecord(entry);
+            if (!gearFits(a, slots[slot], entry)) throw new Error('Cet équipement ne convient pas à cet acteur ou à cet emplacement.');
+        }
+        if (old === item) return false;
+        if (entry && frozen[entry.key]) throw new Error('Libérez la quantité figée avant cet échange.');
+        checkGearReturns(a, before, slot, item);
+        var oldCount = old ? party.numItems(old) : 0, itemCount = item ? party.numItems(item) : 0;
+        if (item && !itemCount && !grantMissing) throw new Error('Ajoutez cet équipement à l’inventaire avant de l’équiper.');
+        try {
+            if (item && !itemCount) {
+                party.gainItem(item, 1, false);
+                if (party.numItems(item) !== 1) throw new Error('Le moteur a refusé l’ajout au sac.');
+            }
+            a.changeEquip(slot, item);
+            if ((a.equips()[slot] || null) !== item) throw new Error('Le moteur a refusé cet équipement.');
+        } catch (error) {
+            var now = a.equips();
+            if (now.length === before.length && before.every(function(e, i) { return e === now[i]; })) {
+                [[item, itemCount], [old, oldCount]].forEach(function(pair) {
+                    if (!pair[0]) return;
+                    var delta = pair[1] - party.numItems(pair[0]);
+                    if (delta) party.gainItem(pair[0], delta, false);
+                    if (party.numItems(pair[0]) !== pair[1]) throw new Error('Vérifiez le sac : le moteur a refusé la restauration.');
+                });
+            }
+            throw error;
+        }
         history = []; redo = []; note(a.name() + ' · équipement', old && old.name || '—', item && item.name || '—', false);
+        return true;
     }
     function setAliases(records, text) {
         records.forEach(assertRecord);
@@ -426,6 +489,7 @@ function createToolkitRuntime(g, storage) {
         editable: editable, setMany: setMany, freezeMany: freezeMany, enforceFrozen: enforceFrozen,
         isFrozen: function(r) { ensureSession(); return host ? host.frozen(r) : !!frozen[r.key]; }, frozenCount: function() { ensureSession(); return host ? host.frozenCount() : Object.keys(frozen).length; },
         search: search, printable: printable, integer: integer, setValue: setValue, gold: gold, actor: actor, actorAction: actorAction, equip: equip,
+        gearRecord: gearRecord, gearFits: gearFits,
         undo: function() { undoAction(false); }, redo: function() { undoAction(true); },
         canUndo: function() { ensureSession(); return history.length > 0; }, canRedo: function() { ensureSession(); return redo.length > 0; },
         log: function() { ensureSession(); return log; }, capture: capture, changed: changed,
@@ -772,7 +836,7 @@ function createToolkitTranslator(runtime, g) {
     return { translate: translate, cancel: cancel, busy: function() { return !!active; } };
 }
 
-var TOOLKIT_CSS = "/* Compact full-screen editor. No width-dependent sidebar or oversized touch theme. */\n.rt,.rt-launch { box-sizing:border-box; font:13px/1.4 system-ui,'Segoe UI',Arial,sans-serif; color:#eef0f4; text-align:left; letter-spacing:normal; }\n.rt *,.rt *::before,.rt *::after { box-sizing:border-box; }\n.rt { position:fixed; z-index:2147483001; inset:0; display:flex; padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px); background:#181a1f; user-select:text; }\n.rt[hidden],.rt [hidden],.rt-launch[hidden] { display:none !important; }\n.rt header,.rt main,.rt footer,.rt section,.rt aside,.rt nav { position:static; top:auto; right:auto; bottom:auto; left:auto; float:none; margin:0; }\n.rt button,.rt input,.rt select,.rt textarea { font:inherit; color:inherit; margin:0; touch-action:manipulation; }\n.rt button { cursor:pointer; border:1px solid #4f5663; border-radius:4px; background:#292d35; padding:4px 8px; min-height:30px; line-height:1.2; white-space:nowrap; }\n.rt button:hover { background:#363d49; }\n.rt button:disabled { opacity:.38; cursor:default; }\n.rt button:focus-visible,.rt input:focus-visible,.rt select:focus-visible,.rt textarea:focus-visible,.rt-launch:focus-visible { outline:2px solid #a9cafa; outline-offset:-2px; }\n.rt button[aria-pressed=true] { color:#b7d3fb; border-color:#799dcd; background:#2a3b53; }\n.rt .rt-primary { background:#91b8ee; color:#10223a; border-color:#91b8ee; font-weight:600; }\n.rt .rt-primary:hover { background:#b2cff7; color:#10223a; }\n.rt input:not([type=checkbox]),.rt select,.rt textarea { width:100%; min-width:0; border:1px solid #535c6c; border-radius:4px; background:#15171c; padding:4px 7px; min-height:30px; }\n.rt input::placeholder { color:#a9b2c1; opacity:1; }\n.rt input[type=checkbox] { width:16px; height:16px; accent-color:#91b8ee; flex-shrink:0; cursor:pointer; }\n.rt .rt-panel { display:flex; flex-direction:column; width:100%; height:100%; min-height:0; min-width:0; overflow:hidden; background:#1e2127; }\n.rt .rt-header { flex-shrink:0; padding:5px 8px; border-bottom:1px solid #505764; background:#191c22; }\n.rt .rt-search-line { display:flex; gap:6px; align-items:center; }\n.rt .rt-search { flex:1; min-width:0; }\n.rt .rt-close { min-width:32px; width:32px; padding:0; flex-shrink:0; }\n.rt .rt-filter-line { display:flex; gap:6px; margin-top:5px; }\n.rt .rt-filter-line label { flex:1; min-width:0; }\n.rt .rt-filter-line select { padding-right:2px; }\n.rt .rt-main { display:flex; flex-direction:column; min-height:0; min-width:0; flex:1; overflow:hidden; }\n.rt .rt-bulkbar { display:flex; justify-content:space-between; gap:6px; align-items:center; min-height:30px; padding:0 6px; border-bottom:1px solid #444c59; background:#252932; font-size:11px; flex-shrink:0; }\n.rt .rt-page-check { display:flex; align-items:center; gap:6px; min-height:30px; cursor:pointer; }\n.rt #rt-bulk-actions { display:flex; gap:3px; }\n.rt #rt-bulk-actions button { min-height:26px; padding:3px 6px; font-size:11px; }\n.rt .rt-list { flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; touch-action:pan-y; list-style:none; margin:0; padding:0; scrollbar-width:thin; }\n.rt .rt-row { display:flex; align-items:center; gap:4px; height:36px; min-height:36px; padding:2px 6px; border-bottom:1px solid #383f4b; }\n.rt .rt-row:nth-child(even) { background:#23272f; }\n.rt .rt-row.rt-frozen { box-shadow:inset 2px 0 #91b8ee; }\n.rt .rt-row-check { display:flex; align-items:center; justify-content:center; width:24px; height:32px; flex-shrink:0; cursor:pointer; }\n.rt .rt-select { display:flex; align-items:center; gap:6px; flex:1; min-width:0; text-align:left; border:0; background:transparent; padding:0 3px; height:30px; }\n.rt .rt-select:hover { background:transparent; }\n.rt .rt-row-id { color:#a8b3c4; font-size:10px; flex-shrink:0; max-width:64px; overflow:hidden; text-overflow:ellipsis; }\n.rt .rt-row-title { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }\n.rt .rt-row-value { font:12px/1.4 Consolas,monospace; flex-shrink:0; width:72px; padding:2px 4px; border:1px solid #4b5565; border-radius:3px; background:#161b23; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right; }\n.rt .rt-row-actions { display:flex; align-items:center; gap:3px; flex-shrink:0; }\n.rt .rt-quick { min-width:28px; min-height:28px; height:28px; padding:2px 4px; font-size:12px; }\n.rt .rt-pagination { display:flex; align-items:center; justify-content:space-between; gap:8px; height:30px; padding:2px 8px; border-top:1px solid #4c5462; background:#191d24; font-size:11px; flex-shrink:0; }\n.rt .rt-pagination > div { display:flex; align-items:center; gap:4px; }\n.rt .rt-pagination button { min-height:24px; height:24px; min-width:28px; padding:0 5px; font-size:17px; }\n.rt .rt-pagination input { width:42px; min-height:24px; height:24px; padding:1px 2px; text-align:center; font-size:11px; -moz-appearance:textfield; }\n.rt .rt-pagination input::-webkit-inner-spin-button { -webkit-appearance:none; }\n.rt .rt-footer { display:flex; align-items:center; gap:8px; padding:4px 8px; min-height:38px; background:#16191f; border-top:1px solid #505867; flex-shrink:0; }\n.rt .rt-footer button { font-size:12px; }\n.rt .rt-status { flex:1; min-width:0; font-size:11px; color:#bdcce1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }\n.rt .rt-error { color:#ffbda9; }\n.rt .rt-modal { position:absolute; inset:0; z-index:2; display:flex; align-items:center; justify-content:center; padding:12px; background:#080b10c9; }\n.rt .rt-modal-dialog { width:480px; max-width:100%; max-height:100%; min-height:0; display:flex; flex-direction:column; border:1px solid #73839d; border-radius:8px; background:#242932; box-shadow:0 16px 48px #0009; overflow:hidden; }\n.rt .rt-modal-dialog > header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 12px; border-bottom:1px solid #505c70; background:#1b2029; }\n.rt .rt-modal-dialog > header h2 { margin:0; font-size:15px; font-weight:600; }\n.rt .rt-modal-content { overflow-y:auto; min-height:0; padding:12px; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; overflow-wrap:anywhere; }\n.rt .rt-modal-status { padding:0 12px 8px; font-size:12px; color:#bad4f9; }\n.rt .rt-modal-status:empty { display:none; }\n.rt .rt-modal-content p { margin:0 0 10px; }\n.rt h2 { font-size:18px; margin:0 0 12px; }\n.rt h3 { font-size:17px; margin:0 0 8px; }\n.rt h4 { margin:12px 0 6px; }\n.rt .rt-id { display:block; color:#b1c9eb; font:11px Consolas,monospace; margin-bottom:8px; }\n.rt .rt-field { display:block; margin:0 0 12px; }\n.rt .rt-field > span { display:block; color:#becada; margin-bottom:4px; font-size:12px; }\n.rt .rt-modal-content input:not([type=checkbox]),.rt .rt-modal-content select,.rt .rt-modal-content textarea { font-size:16px; min-height:34px; }\n.rt textarea { min-height:64px; resize:vertical; }\n.rt .rt-full { width:100%; }\n.rt .rt-actions { display:flex; flex-wrap:wrap; gap:6px; }\n.rt .rt-divider { height:1px; background:#4b5566; margin:14px 0; }\n.rt .rt-muted { color:#b7c2d2; }\n.rt .rt-small { font-size:12px; }\n.rt .rt-note { background:#222f42; color:#c4d8f5; border:1px solid #576c8b; border-radius:4px; padding:8px; margin:10px 0; font-size:12px; }\n.rt .rt-empty { padding:24px 12px; text-align:center; color:#b9c4d4; }\n.rt pre { white-space:pre-wrap; overflow-wrap:anywhere; }\n.rt .rt-checkbox { display:flex; align-items:center; gap:8px; padding:6px 0; }\n.rt .rt-stats { display:flex; flex-wrap:wrap; gap:12px; margin:12px 0; }\n.rt .rt-stat strong { display:block; font-size:20px; }\n.rt .rt-log-entry { border-bottom:1px solid #505867; padding:10px 0; }\n.rt .rt-log-entry strong { display:block; }\n.rt code { word-break:break-word; }\n.rt .rt-sr { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }\n.rt-launch { position:fixed; top:12px; right:12px; z-index:2147483000; background:#26374e; border:1px solid #8daedb; border-radius:5px; padding:6px 10px; cursor:pointer; }\n@media(max-width:500px) {\n .rt .rt-row { gap:2px; padding:2px 3px; }\n .rt .rt-row-check { width:20px; }\n .rt .rt-row-id { display:none; }\n .rt .rt-row-value { width:48px; }\n .rt .rt-row-actions { gap:2px; }\n .rt .rt-quick { min-width:24px; padding:2px 3px; font-size:11px; }\n .rt .rt-select { font-size:12px; }\n .rt .rt-footer { gap:4px; }\n .rt .rt-status { font-size:10px; }\n .rt .rt-modal { padding:8px; }\n}\n@media(prefers-reduced-motion:reduce) { .rt * { scroll-behavior:auto !important; transition:none !important; } }\n/* Toolbox navigation and reliable constrained scroll areas, including old WebViews. */\n.rt .rt-home { display:none; flex-direction:column; min-height:0; height:100%; }\n.rt.rt-home-open .rt-home { display:flex; }\n.rt.rt-home-open .rt-panel > .rt-header,.rt.rt-home-open .rt-main,.rt.rt-home-open .rt-footer { display:none; }\n.rt .rt-home-header { display:flex; align-items:center; gap:10px; padding:6px 8px; border-bottom:1px solid #505764; flex-shrink:0; }\n.rt .rt-home-header h1 { font-size:16px; margin:0; }\n.rt .rt-home-header > span { margin-left:auto; font-size:11px; }\n.rt .rt-home-content { display:block; flex:1 1 auto; min-height:0; overflow-y:auto; padding:8px; }\n.rt .rt-home-content button { display:block; position:relative; width:100%; padding:9px 34px 9px 10px; text-align:left; margin-bottom:6px; white-space:normal; }\n.rt .rt-home-content strong { display:block; font-size:14px; font-weight:600; }\n.rt .rt-home-content span { display:block; font-size:12px; color:#bdc8d9; margin-top:2px; }\n.rt .rt-home-content b { position:absolute; right:12px; top:14px; font-size:18px; }\n.rt .rt-icon { width:20px; height:20px; flex:none; image-rendering:pixelated; }\n.rt .rt-modal-dialog > header,.rt .rt-modal-status { flex-shrink:0; }\n.rt .rt-modal-dialog > header { justify-content:flex-start; gap:6px; }\n.rt .rt-modal-content { flex:1 1 auto; }\n.rt .rt-list,.rt .rt-modal-content,.rt .rt-home-content { touch-action:none; overscroll-behavior:contain; }\n.rt .rt-list { user-select:none; }\n.rt .rt-coordinate-fields { display:flex; gap:8px; }\n.rt .rt-coordinate-fields > label { flex:1; min-width:0; }\n.rt-launch { right:auto; left:12px; left:max(12px,env(safe-area-inset-left,0px)); top:max(12px,env(safe-area-inset-top,0px)); }\n.rt { --rt-scrollbar-width:24px; --rt-font-size:13px; font-size:var(--rt-font-size); }\n.rt .rt-select { font-size:var(--rt-font-size); }\n.rt .rt-list,.rt .rt-home-content,.rt .rt-modal-content { padding-right:calc(var(--rt-scrollbar-width) + 8px); scrollbar-width:none; }\n.rt .rt-list::-webkit-scrollbar,.rt .rt-home-content::-webkit-scrollbar,.rt .rt-modal-content::-webkit-scrollbar { display:none; }\n.rt textarea::-webkit-scrollbar { width:18px; height:18px; }\n.rt textarea::-webkit-scrollbar-track { background:#181d25; }\n.rt textarea::-webkit-scrollbar-thumb { background:#9eb3ce; border:3px solid #181d25; border-radius:8px; }\n.rt .rt-scrollbar { position:fixed; z-index:4; background:#11161e; border-left:1px solid #64748b; touch-action:none; user-select:none; cursor:pointer; }\n.rt .rt-scroll-thumb { width:100%; min-height:24px; border:4px solid #11161e; border-radius:9px; background:#9eb3ce; cursor:grab; }\n.rt .rt-scrollbar[aria-disabled=true] .rt-scroll-thumb { background:#394353; }\n.rt .rt-scrollbar:focus-visible { outline:2px solid #bdd8ff; outline-offset:-2px; }\n.rt .rt-toggle { display:flex; align-items:center; gap:12px; min-height:40px; cursor:pointer; position:relative; }\n.rt .rt-toggle > span:first-child { flex:1; }\n.rt .rt-toggle input { position:absolute; right:0; width:48px; height:30px; opacity:0; margin:0; z-index:1; cursor:pointer; }\n.rt .rt-toggle-track { display:block; width:48px; height:28px; flex:none; border-radius:20px; background:#495363; border:1px solid #7a879c; padding:3px; }\n.rt .rt-toggle-track::after { content:''; display:block; width:20px; height:20px; border-radius:50%; background:#f0f3f9; }\n.rt .rt-toggle input:checked + .rt-toggle-track { background:#4272ac; border-color:#a0c5f4; }\n.rt .rt-toggle input:checked + .rt-toggle-track::after { transform:translateX(19px); }\n.rt .rt-toggle input:focus-visible + .rt-toggle-track { outline:2px solid #bdd8ff; outline-offset:3px; }\n.rt .rt-stat-quick { margin:-5px 0 14px; }\n.rt .rt-stat-quick button { flex:1; }\n.rt .rt-import { margin-top:12px; }\n\n.rt .rt-home-content button[role=\"switch\"] { padding-right:72px; }\n.rt .rt-home-content .rt-toggle-track { top:50%; margin-top:-14px; }\n.rt .rt-home-content [aria-checked=\"true\"] .rt-toggle-track { background:#4272ac; border-color:#a0c5f4; }\n.rt .rt-home-content [aria-checked=\"true\"] .rt-toggle-track::after { transform:translateX(19px); }\n\n.rt .rt-bottom-close { position:absolute; bottom:4px; left:4px; z-index:6; width:32px; height:30px; min-height:30px; text-align:center; padding:0; background:#26374e; }\n.rt .rt-place-row { display:flex; gap:6px; margin:6px 0; }\n.rt .rt-place-row > button:first-child { flex:1; min-width:0; }\n.rt .rt-place-row small { display:block; color:#bdc8d8; }\n.rt #rt-places { margin:12px 0; }\n\n.rt.rt-close-recall .rt-footer { padding-left:42px; }\n.rt.rt-close-recall .rt-modal { padding-bottom:42px; }\n.rt.rt-close-recall .rt-home-content { padding-bottom:42px; }\n\n@media (orientation:portrait) and (max-width:600px) {\n .rt .rt-home-header { min-height:44px; }\n .rt .rt-home-content strong { font-size:15px; }\n .rt .rt-home-content span { font-size:12px; }\n .rt .rt-home-content button { min-height:54px; }\n .rt .rt-modal { padding:6px; }\n .rt .rt-modal-dialog { width:100%; }\n .rt .rt-filter-line { flex-wrap:wrap; }\n .rt #rt-exact-wrap { flex-basis:100%; }\n .rt .rt-row-value { width:42px; }\n .rt .rt-row-check { width:18px; }\n .rt .rt-icon { width:16px; height:16px; }\n .rt .rt-select { gap:3px; }\n .rt .rt-bulkbar { flex-wrap:wrap; }\n}\n";
+var TOOLKIT_CSS = "/* Compact full-screen editor. No width-dependent sidebar or oversized touch theme. */\n.rt,.rt-launch { box-sizing:border-box; font:13px/1.4 system-ui,'Segoe UI',Arial,sans-serif; color:#eef0f4; text-align:left; letter-spacing:normal; }\n.rt *,.rt *::before,.rt *::after { box-sizing:border-box; }\n.rt { position:fixed; z-index:2147483001; inset:0; display:flex; padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px); background:#181a1f; user-select:text; }\n.rt[hidden],.rt [hidden],.rt-launch[hidden] { display:none !important; }\n.rt header,.rt main,.rt footer,.rt section,.rt aside,.rt nav { position:static; top:auto; right:auto; bottom:auto; left:auto; float:none; margin:0; }\n.rt button,.rt input,.rt select,.rt textarea { font:inherit; color:inherit; margin:0; touch-action:manipulation; }\n.rt button { cursor:pointer; border:1px solid #4f5663; border-radius:4px; background:#292d35; padding:4px 8px; min-height:30px; line-height:1.2; white-space:nowrap; }\n.rt button:hover { background:#363d49; }\n.rt button:disabled { opacity:.38; cursor:default; }\n.rt button:focus-visible,.rt input:focus-visible,.rt select:focus-visible,.rt textarea:focus-visible,.rt-launch:focus-visible { outline:2px solid #a9cafa; outline-offset:-2px; }\n.rt button[aria-pressed=true] { color:#b7d3fb; border-color:#799dcd; background:#2a3b53; }\n.rt .rt-primary { background:#91b8ee; color:#10223a; border-color:#91b8ee; font-weight:600; }\n.rt .rt-primary:hover { background:#b2cff7; color:#10223a; }\n.rt input:not([type=checkbox]),.rt select,.rt textarea { width:100%; min-width:0; border:1px solid #535c6c; border-radius:4px; background:#15171c; padding:4px 7px; min-height:30px; }\n.rt input::placeholder { color:#a9b2c1; opacity:1; }\n.rt input[type=checkbox] { width:16px; height:16px; accent-color:#91b8ee; flex-shrink:0; cursor:pointer; }\n.rt .rt-panel { display:flex; flex-direction:column; width:100%; height:100%; min-height:0; min-width:0; overflow:hidden; background:#1e2127; }\n.rt .rt-header { flex-shrink:0; padding:5px 8px; border-bottom:1px solid #505764; background:#191c22; }\n.rt .rt-search-line { display:flex; gap:6px; align-items:center; }\n.rt .rt-search { flex:1; min-width:0; }\n.rt .rt-close { min-width:32px; width:32px; padding:0; flex-shrink:0; }\n.rt .rt-filter-line { display:flex; gap:6px; margin-top:5px; }\n.rt .rt-filter-line label { flex:1; min-width:0; }\n.rt .rt-filter-line select { padding-right:2px; }\n.rt .rt-main { display:flex; flex-direction:column; min-height:0; min-width:0; flex:1; overflow:hidden; }\n.rt .rt-bulkbar { display:flex; justify-content:space-between; gap:6px; align-items:center; min-height:30px; padding:0 6px; border-bottom:1px solid #444c59; background:#252932; font-size:11px; flex-shrink:0; }\n.rt .rt-page-check { display:flex; align-items:center; gap:6px; min-height:30px; cursor:pointer; }\n.rt #rt-bulk-actions { display:flex; gap:3px; }\n.rt #rt-bulk-actions button { min-height:26px; padding:3px 6px; font-size:11px; }\n.rt .rt-list { flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; touch-action:pan-y; list-style:none; margin:0; padding:0; scrollbar-width:thin; }\n.rt .rt-row { display:flex; align-items:center; gap:4px; height:36px; min-height:36px; padding:2px 6px; border-bottom:1px solid #383f4b; }\n.rt .rt-row:nth-child(even) { background:#23272f; }\n.rt .rt-row.rt-frozen { box-shadow:inset 2px 0 #91b8ee; }\n.rt .rt-row-check { display:flex; align-items:center; justify-content:center; width:24px; height:32px; flex-shrink:0; cursor:pointer; }\n.rt .rt-select { display:flex; align-items:center; gap:6px; flex:1; min-width:0; text-align:left; border:0; background:transparent; padding:0 3px; height:30px; }\n.rt .rt-select:hover { background:transparent; }\n.rt .rt-row-id { color:#a8b3c4; font-size:10px; flex-shrink:0; max-width:64px; overflow:hidden; text-overflow:ellipsis; }\n.rt .rt-row-title { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }\n.rt .rt-row-value { font:12px/1.4 Consolas,monospace; flex-shrink:0; width:72px; padding:2px 4px; border:1px solid #4b5565; border-radius:3px; background:#161b23; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:right; }\n.rt .rt-row-actions { display:flex; align-items:center; gap:3px; flex-shrink:0; }\n.rt .rt-quick { min-width:28px; min-height:28px; height:28px; padding:2px 4px; font-size:12px; }\n.rt .rt-pagination { display:flex; align-items:center; justify-content:space-between; gap:8px; height:30px; padding:2px 8px; border-top:1px solid #4c5462; background:#191d24; font-size:11px; flex-shrink:0; }\n.rt .rt-pagination > div { display:flex; align-items:center; gap:4px; }\n.rt .rt-pagination button { min-height:24px; height:24px; min-width:28px; padding:0 5px; font-size:17px; }\n.rt .rt-pagination input { width:42px; min-height:24px; height:24px; padding:1px 2px; text-align:center; font-size:11px; -moz-appearance:textfield; }\n.rt .rt-pagination input::-webkit-inner-spin-button { -webkit-appearance:none; }\n.rt .rt-footer { display:flex; align-items:center; gap:8px; padding:4px 8px; min-height:38px; background:#16191f; border-top:1px solid #505867; flex-shrink:0; }\n.rt .rt-footer button { font-size:12px; }\n.rt .rt-status { flex:1; min-width:0; font-size:11px; color:#bdcce1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }\n.rt .rt-error { color:#ffbda9; }\n.rt .rt-modal { position:absolute; inset:0; z-index:2; display:flex; align-items:center; justify-content:center; padding:12px; background:#080b10c9; }\n.rt .rt-modal-dialog { width:480px; max-width:100%; max-height:100%; min-height:0; display:flex; flex-direction:column; border:1px solid #73839d; border-radius:8px; background:#242932; box-shadow:0 16px 48px #0009; overflow:hidden; }\n.rt .rt-modal-dialog > header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 12px; border-bottom:1px solid #505c70; background:#1b2029; }\n.rt .rt-modal-dialog > header h2 { margin:0; font-size:15px; font-weight:600; }\n.rt .rt-modal-content { overflow-y:auto; min-height:0; padding:12px; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; overflow-wrap:anywhere; }\n.rt .rt-modal-status { padding:0 12px 8px; font-size:12px; color:#bad4f9; }\n.rt .rt-modal-status:empty { display:none; }\n.rt .rt-modal-content p { margin:0 0 10px; }\n.rt h2 { font-size:18px; margin:0 0 12px; }\n.rt h3 { font-size:17px; margin:0 0 8px; }\n.rt h4 { margin:12px 0 6px; }\n.rt .rt-id { display:block; color:#b1c9eb; font:11px Consolas,monospace; margin-bottom:8px; }\n.rt .rt-field { display:block; margin:0 0 12px; }\n.rt .rt-field > span { display:block; color:#becada; margin-bottom:4px; font-size:12px; }\n.rt .rt-modal-content input:not([type=checkbox]),.rt .rt-modal-content select,.rt .rt-modal-content textarea { font-size:16px; min-height:34px; }\n.rt textarea { min-height:64px; resize:vertical; }\n.rt .rt-full { width:100%; }\n.rt .rt-actions { display:flex; flex-wrap:wrap; gap:6px; }\n.rt .rt-divider { height:1px; background:#4b5566; margin:14px 0; }\n.rt .rt-muted { color:#b7c2d2; }\n.rt .rt-small { font-size:12px; }\n.rt .rt-note { background:#222f42; color:#c4d8f5; border:1px solid #576c8b; border-radius:4px; padding:8px; margin:10px 0; font-size:12px; }\n.rt .rt-empty { padding:24px 12px; text-align:center; color:#b9c4d4; }\n.rt pre { white-space:pre-wrap; overflow-wrap:anywhere; }\n.rt .rt-checkbox { display:flex; align-items:center; gap:8px; padding:6px 0; }\n.rt .rt-stats { display:flex; flex-wrap:wrap; gap:12px; margin:12px 0; }\n.rt .rt-stat strong { display:block; font-size:20px; }\n.rt .rt-log-entry { border-bottom:1px solid #505867; padding:10px 0; }\n.rt .rt-log-entry strong { display:block; }\n.rt code { word-break:break-word; }\n.rt .rt-sr { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }\n.rt-launch { position:fixed; top:12px; right:12px; z-index:2147483000; background:#26374e; border:1px solid #8daedb; border-radius:5px; padding:6px 10px; cursor:pointer; }\n@media(max-width:500px) {\n .rt .rt-row { gap:2px; padding:2px 3px; }\n .rt .rt-row-check { width:20px; }\n .rt .rt-row-id { display:none; }\n .rt .rt-row-value { width:48px; }\n .rt .rt-row-actions { gap:2px; }\n .rt .rt-quick { min-width:24px; padding:2px 3px; font-size:11px; }\n .rt .rt-select { font-size:12px; }\n .rt .rt-footer { gap:4px; }\n .rt .rt-status { font-size:10px; }\n .rt .rt-modal { padding:8px; }\n}\n@media(prefers-reduced-motion:reduce) { .rt * { scroll-behavior:auto !important; transition:none !important; } }\n/* Toolbox navigation and reliable constrained scroll areas, including old WebViews. */\n.rt .rt-home { display:none; flex-direction:column; min-height:0; height:100%; }\n.rt.rt-home-open .rt-home { display:flex; }\n.rt.rt-home-open .rt-panel > .rt-header,.rt.rt-home-open .rt-main,.rt.rt-home-open .rt-footer { display:none; }\n.rt .rt-home-header { display:flex; align-items:center; gap:10px; padding:6px 8px; border-bottom:1px solid #505764; flex-shrink:0; }\n.rt .rt-home-header h1 { font-size:16px; margin:0; }\n.rt .rt-home-header > span { margin-left:auto; font-size:11px; }\n.rt .rt-home-content { display:block; flex:1 1 auto; min-height:0; overflow-y:auto; padding:8px; }\n.rt .rt-home-content button { display:block; position:relative; width:100%; padding:9px 34px 9px 10px; text-align:left; margin-bottom:6px; white-space:normal; }\n.rt .rt-home-content strong { display:block; font-size:14px; font-weight:600; }\n.rt .rt-home-content span { display:block; font-size:12px; color:#bdc8d9; margin-top:2px; }\n.rt .rt-home-content b { position:absolute; right:12px; top:14px; font-size:18px; }\n.rt .rt-icon { width:20px; height:20px; flex:none; image-rendering:pixelated; }\n.rt .rt-modal-dialog > header,.rt .rt-modal-status { flex-shrink:0; }\n.rt .rt-modal-dialog > header { justify-content:flex-start; gap:6px; }\n.rt .rt-modal-content { flex:1 1 auto; }\n.rt .rt-list,.rt .rt-modal-content,.rt .rt-home-content { touch-action:none; overscroll-behavior:contain; }\n.rt .rt-list { user-select:none; }\n.rt .rt-coordinate-fields { display:flex; gap:8px; }\n.rt .rt-coordinate-fields > label { flex:1; min-width:0; }\n.rt-launch { right:auto; left:12px; left:max(12px,env(safe-area-inset-left,0px)); top:max(12px,env(safe-area-inset-top,0px)); }\n.rt { --rt-scrollbar-width:24px; --rt-font-size:13px; font-size:var(--rt-font-size); }\n.rt .rt-select { font-size:var(--rt-font-size); }\n.rt .rt-list,.rt .rt-home-content,.rt .rt-modal-content { padding-right:calc(var(--rt-scrollbar-width) + 8px); scrollbar-width:none; }\n.rt .rt-list::-webkit-scrollbar,.rt .rt-home-content::-webkit-scrollbar,.rt .rt-modal-content::-webkit-scrollbar { display:none; }\n.rt textarea::-webkit-scrollbar { width:18px; height:18px; }\n.rt textarea::-webkit-scrollbar-track { background:#181d25; }\n.rt textarea::-webkit-scrollbar-thumb { background:#9eb3ce; border:3px solid #181d25; border-radius:8px; }\n.rt .rt-scrollbar { position:fixed; z-index:4; background:#11161e; border-left:1px solid #64748b; touch-action:none; user-select:none; cursor:pointer; }\n.rt .rt-scroll-thumb { width:100%; min-height:24px; border:4px solid #11161e; border-radius:9px; background:#9eb3ce; cursor:grab; }\n.rt .rt-scrollbar[aria-disabled=true] .rt-scroll-thumb { background:#394353; }\n.rt .rt-scrollbar:focus-visible { outline:2px solid #bdd8ff; outline-offset:-2px; }\n.rt .rt-toggle { display:flex; align-items:center; gap:12px; min-height:40px; cursor:pointer; position:relative; }\n.rt .rt-toggle > span:first-child { flex:1; }\n.rt .rt-toggle input { position:absolute; right:0; width:48px; height:30px; opacity:0; margin:0; z-index:1; cursor:pointer; }\n.rt .rt-toggle-track { display:block; width:48px; height:28px; flex:none; border-radius:20px; background:#495363; border:1px solid #7a879c; padding:3px; }\n.rt .rt-toggle-track::after { content:''; display:block; width:20px; height:20px; border-radius:50%; background:#f0f3f9; }\n.rt .rt-toggle input:checked + .rt-toggle-track { background:#4272ac; border-color:#a0c5f4; }\n.rt .rt-toggle input:checked + .rt-toggle-track::after { transform:translateX(19px); }\n.rt .rt-toggle input:focus-visible + .rt-toggle-track { outline:2px solid #bdd8ff; outline-offset:3px; }\n.rt .rt-stat-quick { margin:-5px 0 14px; }\n.rt .rt-stat-quick button { flex:1; }\n.rt .rt-import { margin-top:12px; }\n\n.rt .rt-home-content button[role=\"switch\"] { padding-right:72px; }\n.rt .rt-home-content .rt-toggle-track { top:50%; margin-top:-14px; }\n.rt .rt-home-content [aria-checked=\"true\"] .rt-toggle-track { background:#4272ac; border-color:#a0c5f4; }\n.rt .rt-home-content [aria-checked=\"true\"] .rt-toggle-track::after { transform:translateX(19px); }\n\n.rt .rt-bottom-close { position:absolute; bottom:4px; left:4px; z-index:6; width:32px; height:30px; min-height:30px; text-align:center; padding:0; background:#26374e; }\n.rt .rt-place-row { display:flex; gap:6px; margin:6px 0; }\n.rt .rt-place-row > button:first-child { flex:1; min-width:0; }\n.rt .rt-place-row small { display:block; color:#bdc8d8; }\n.rt #rt-places { margin:12px 0; }\n\n.rt .rt-gear-fields { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:8px; }\n.rt .rt-gear-fields select { width:100%; min-width:0; }\n.rt .rt-gear-worn, .rt .rt-gear-name, .rt .rt-gear-controls, .rt .rt-gear-owned { display:flex; align-items:center; gap:8px; }\n.rt .rt-gear-worn { justify-content:space-between; margin:0 0 12px; }\n.rt .rt-gear-worn strong, .rt .rt-gear-list strong { display:block; overflow-wrap:anywhere; }\n.rt .rt-gear-list { padding:0; margin:8px 0; list-style:none; }\n.rt .rt-gear-list li { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:6px 12px; padding:7px 0; border-top:1px solid #414651; }\n.rt .rt-gear-controls { flex-wrap:wrap; gap:4px; }\n.rt .rt-gear-list small, .rt .rt-gear-worn small, .rt .rt-gear-count { color:#bdc8d8; }\n.rt .rt-gear-pages { justify-content:center; align-items:center; }\n.rt .rt-gear-pages:empty { display:none; }\n\n.rt.rt-close-recall .rt-footer { padding-left:42px; }\n.rt.rt-close-recall .rt-modal { padding-bottom:42px; }\n.rt.rt-close-recall .rt-home-content { padding-bottom:42px; }\n\n@media (orientation:portrait) and (max-width:600px) {\n .rt .rt-home-header { min-height:44px; }\n .rt .rt-home-content strong { font-size:15px; }\n .rt .rt-home-content span { font-size:12px; }\n .rt .rt-home-content button { min-height:54px; }\n .rt .rt-modal { padding:6px; }\n .rt .rt-modal-dialog { width:100%; }\n .rt .rt-filter-line { flex-wrap:wrap; }\n .rt #rt-exact-wrap { flex-basis:100%; }\n .rt .rt-row-value { width:42px; }\n .rt .rt-row-check { width:18px; }\n .rt .rt-icon { width:16px; height:16px; }\n .rt .rt-select { gap:3px; }\n .rt .rt-bulkbar { flex-wrap:wrap; }\n}\n";
 function createToolkitPortrait(g, runtime) {
     'use strict';
     var original=null, active=false, dirty=true, locked=false, error='';
@@ -928,6 +992,24 @@ function createToolkitPortrait(g, runtime) {
 }
 
 var toolkitEnglish = {
+    'Équipements':'Equipment','Armes et armures par personnage':'Weapons and armor by party member',
+    'Emplacements équipés':'Equipment slots','Emplacement d’arme':'Weapon slot','Emplacement d’armure':'Armor slot',
+    'Valeur de l’emplacement vide':'Empty slot value','ID d’équipement dans le jeu (facultatif)':'In-game equipment ID (optional)',
+    'ID d’équipement':'Equipment ID','Aucun équipement associé au profil.':'No equipment mapped in this profile.',
+    'ID d’équipement invalide.':'Invalid equipment ID.','Renseignez la valeur de l’emplacement vide.':'Enter the empty slot value.',
+    '‹ Équipements':'‹ Equipment',
+    'Emplacement':'Slot','Équipement porté':'Equipped','Gérer l’équipement':'Manage equipment','Déséquiper':'Unequip',
+    'Rechercher un équipement':'Search equipment','Nom ou #ID':'Name or #ID','En stock uniquement':'In inventory only',
+    'Sac':'Inventory','Équiper':'Equip','Équipé':'Equipped','Créer et équiper':'Create and equip',
+    'Ajouter un exemplaire au sac':'Add one to inventory','Retirer un exemplaire du sac':'Remove one from inventory',
+    'Aucun équipement compatible.':'No matching equipment.','Aucun emplacement.':'No slots.',
+    'Quantité mise à jour.':'Quantity updated.','Équipement remis dans le sac.':'Equipment returned to inventory.',
+    'Équipement appliqué.':'Equipment changed.','Libérez la quantité figée avant cet échange.':'Unfreeze the quantity before changing equipment.',
+    'Le sac est plein pour l’équipement à retirer.':'Inventory is full for the equipped item.',
+    'Le moteur a refusé l’ajout au sac.':'The game refused the inventory change.',
+    'Le moteur a refusé cet équipement.':'The game refused the equipment change.',
+    'Équipement disponible hors combat.':'Equipment can be changed outside battle.',
+    'Cet emplacement est verrouillé par le jeu.':'This slot is locked by the game.',
     'Sauvegardes Toolkit':'Toolkit saves','Charger la sauvegarde':'Load save','Sauvegarde chargée.':'Save loaded.',
     'Base variable':'Mutable database','Textes':'Strings','Profil':'Profile','Actualisation':'Refresh interval','Rôle':'Role','Interrupteur':'Switch','Objet':'Item','Arme':'Weapon','Armure':'Armor','Argent':'Gold','Nom':'Name','Équipe':'Team','Alliés':'Allies','ID du maximum':'Maximum field ID','Icône':'Icon','HP figés suivant le profil':'Freeze HP using the profile','Champs associés au profil':'Profile fields','Sauvegarde Toolkit':'Toolkit save','Objets, ressources et stats du jeu':'Game items, resources and stats','Aucun champ associé.':'No mapped fields.','Lecture des HP en cours.':'Reading HP.','Attendez la lecture du jeu.':'Wait for game values.','WOLF ne répond pas.':'WOLF is not responding.','Profil enregistré.':'Profile saved.','Profil importé.':'Profile imported.','En cours…':'Working…','Appliqué.':'Applied.',
     'Portraits en bas':'Portraits at the bottom',
@@ -1161,6 +1243,151 @@ function installToolkitScrollbars() {
     g.addEventListener('resize',refreshToolkitScroll);
 }
 
+var gearView = null, gearTimer = null;
+
+function gearItemName(item) {
+    var record = runtime.gearRecord(item);
+    return record ? runtime.title(record) : item ? item.name : '';
+}
+
+function openGear(actorId, preferred) {
+    var fromEditor = modalMode === 'edit';
+    var members = gameTools.members().slice();
+    if (actorId && !members.some(function(a) { return a.actorId() === actorId; })) members.push(runtime.actor(actorId));
+    openModal('equipment', 'Équipements');
+    gearView = { fromEditor:fromEditor, page:0, rows:[] };
+    if (!members.length) {
+        $('.rt-modal-content').innerHTML = empty('Aucun acteur dans l’équipe.', '');
+        return;
+    }
+    $('.rt-modal-content').innerHTML =
+        '<div class="rt-gear-fields"><label class="rt-field"><span>Acteur</span><select id="rt-gear-actor" data-game-text></select></label>' +
+        '<label class="rt-field"><span>Emplacement</span><select id="rt-gear-slot" data-game-text></select></label></div>' +
+        '<div class="rt-gear-worn"><div><small>Équipement porté</small><strong id="rt-gear-current"></strong></div>' +
+        button('Déséquiper','gear-remove') + '</div>' +
+        field('Rechercher un équipement','rt-gear-query','','search','autocomplete="off" placeholder="Nom ou #ID"') +
+        '<label class="rt-gear-owned"><input type="checkbox" id="rt-gear-owned"> <span>En stock uniquement</span></label>' +
+        '<ul class="rt-gear-list" id="rt-gear-list"></ul><div class="rt-actions rt-gear-pages" id="rt-gear-pages"></div>';
+    var actors = $('#rt-gear-actor');
+    actors.innerHTML = members.map(function(a) {
+        return '<option value="' + a.actorId() + '">' + esc(a.name()) + '</option>';
+    }).join('');
+    if (actorId) actors.value = String(actorId);
+    renderGearSlots(preferred);
+    if (preferred) $('#rt-gear-query').value = '#' + preferred.id;
+    renderGearList();
+}
+
+function renderGearSlots(preferred) {
+    var a = runtime.actor(Number($('#rt-gear-actor').value)), slots = a.equipSlots(), worn = a.equips();
+    var select = $('#rt-gear-slot'), previous = select.selectedIndex;
+    select.innerHTML = slots.map(function(type, i) {
+        var name = (g.$dataSystem.equipTypes || [])[type] || '#' + type;
+        return '<option value="' + i + '">' + (i+1) + ' · ' + esc(name) + '</option>';
+    }).join('');
+    if (!slots.length) return;
+    var index = Math.max(0, Math.min(previous, slots.length - 1));
+    if (preferred) {
+        var best = -1, score = -1;
+        slots.forEach(function(type, i) {
+            if (!runtime.gearFits(a, type, preferred)) return;
+            var rank = (a.isEquipChangeOk(i) ? 4 : 0) + (worn[i] === preferred.data ? 2 : !worn[i] ? 1 : 0);
+            if (rank > score) { best = i; score = rank; }
+        });
+        if (best >= 0) index = best;
+    }
+    select.selectedIndex = index;
+}
+
+function gearDifference(item, worn) {
+    var labels = ['HP','MP','ATK','DEF','MAT','MDF','AGI','LUK'];
+    return (item.params || []).map(function(value, i) {
+        var delta = value - (worn && worn.params && worn.params[i] || 0);
+        return delta ? labels[i] + ' ' + (delta > 0 ? '+' : '') + delta : '';
+    }).filter(Boolean).join(' · ');
+}
+
+function renderGearList() {
+    if (modalMode !== 'equipment' || !$('#rt-gear-slot')) return;
+    var a = runtime.actor(Number($('#rt-gear-actor').value)), slot = $('#rt-gear-slot').selectedIndex;
+    var type = a.equipSlots()[slot], worn = a.equips()[slot], current = $('#rt-gear-current');
+    var unlocked = slot >= 0 && !g.$gameParty.inBattle() && a.isEquipChangeOk(slot);
+    var old = runtime.gearRecord(worn);
+    var canReturn = !worn || ((!old || !runtime.isFrozen(old)) && g.$gameParty.numItems(worn) < g.$gameParty.maxItems(worn));
+    current.textContent = worn ? gearItemName(worn) : 'Vide';
+    if (worn) current.setAttribute('data-game-text',''); else current.removeAttribute('data-game-text');
+    $('[data-action="gear-remove"]').disabled = !worn || !unlocked || !canReturn;
+    var query = $('#rt-gear-query').value, owned = $('#rt-gear-owned').checked;
+    var candidates = [];
+    if (slot >= 0) ['weapons','armors'].forEach(function(kind) {
+        runtime.search(kind, query, owned ? 'active' : 'all').forEach(function(r) {
+            if (runtime.gearFits(a, type, r)) candidates.push(r);
+        });
+    });
+    var perPage = 20, pages = Math.max(1, Math.ceil(candidates.length / perPage));
+    gearView.page = Math.min(Math.max(gearView.page, 0), pages - 1);
+    gearView.rows = candidates.slice(gearView.page * perPage, (gearView.page + 1) * perPage);
+    var list = $('#rt-gear-list');
+    list.innerHTML = gearView.rows.map(function(r, i) {
+        var count = runtime.value(r), max = g.$gameParty.maxItems(r.data), same = r.data === worn;
+        var diff = gearDifference(r.data, worn);
+        var canWear = unlocked && canReturn && !same && !runtime.isFrozen(r) && (count > 0 || max > 0);
+        function action(label, command, disabled, accessible) {
+            return '<button type="button" data-action="gear-' + command + '" data-index="' + i + '"' +
+                (disabled ? ' disabled' : '') + (accessible ? ' aria-label="' + accessible + '"' : '') + '>' + label + '</button>';
+        }
+        var icon = typeof r.data.iconIndex === 'number' ? '<canvas class="rt-icon" width="32" height="32" data-icon="'+Number(r.data.iconIndex)+'" aria-hidden="true"></canvas>' : '';
+        return '<li><div class="rt-gear-name">' + icon + '<div><strong data-game-text>' + esc(runtime.title(r)) +
+            '</strong><small>#' + r.id + (diff ? ' · ' + esc(diff) : '') + '</small></div></div><div class="rt-gear-controls">' +
+            '<span class="rt-gear-count"><span>Sac</span> ×' + count + '</span>' +
+            action('−1','take',count <= 0,'Retirer un exemplaire du sac') + action('+1','give',count >= max,'Ajouter un exemplaire au sac') +
+            action(same ? 'Équipé' : count ? 'Équiper' : 'Créer et équiper', count ? 'wear' : 'create', !canWear) + '</div></li>';
+    }).join('') || '<li class="rt-muted">Aucun équipement compatible.</li>';
+    var pager = $('#rt-gear-pages');
+    pager.innerHTML = pages <= 1 ? '' : '<button type="button" data-action="gear-prev" aria-label="Page précédente"' +
+        (!gearView.page ? ' disabled' : '') + '>‹</button><span>' + (gearView.page+1) + ' / ' + pages +
+        '</span><button type="button" data-action="gear-next" aria-label="Page suivante"' + (gearView.page+1 === pages ? ' disabled' : '') + '>›</button>';
+    var reason = g.$gameParty.inBattle() ? 'Équipement disponible hors combat.' : slot < 0 ? 'Aucun emplacement.' :
+        !unlocked ? 'Cet emplacement est verrouillé par le jeu.' : !canReturn ? (old && runtime.isFrozen(old) ? 'Libérez la quantité figée avant cet échange.' : 'Le sac est plein pour l’équipement à retirer.') : '';
+    if (reason) say(reason);
+    paintIcons(list);
+}
+
+function gearAction(action, node) {
+    if (modalMode !== 'equipment' || !gearView) return;
+    var actorId = Number($('#rt-gear-actor').value), slot = $('#rt-gear-slot').selectedIndex;
+    var r = gearView.rows[Number(node.getAttribute('data-index'))];
+    if (action === 'prev' || action === 'next') {
+        gearView.page += action === 'next' ? 1 : -1;
+        renderGearList();
+        $('#rt-gear-list').scrollIntoView({block:'start'});
+        return;
+    }
+    if (action === 'give' || action === 'take') {
+        runtime.setValue(r, runtime.value(r) + (action === 'give' ? 1 : -1));
+        say('Quantité mise à jour.');
+    } else {
+        runtime.equip(actorId, slot, action === 'remove' ? null : r, action === 'create');
+        renderGearSlots();
+        say(action === 'remove' ? 'Équipement remis dans le sac.' : 'Équipement appliqué.');
+    }
+    dirty = true;
+    renderGearList();
+}
+
+function gearInput(event) {
+    if (modalMode !== 'equipment') return;
+    var id = event.target.id;
+    if (['rt-gear-actor','rt-gear-slot','rt-gear-owned','rt-gear-query'].indexOf(id) < 0) return;
+    if (event.type !== (id === 'rt-gear-query' ? 'input' : 'change')) return;
+    if (id === 'rt-gear-actor') renderGearSlots();
+    gearView.page = 0;
+    say('');
+    clearTimeout(gearTimer);
+    if (id === 'rt-gear-query') gearTimer = setTimeout(function() { guarded(renderGearList); }, 100);
+    else renderGearList();
+}
+
 /* DOM overlay; no engine assets, dependencies or timers while closed. */
 var toolkitHost = g.ToolkitHost;
 var toolkitParams = g.PluginManager && g.PluginManager.parameters('RPGMToolkit') || {};
@@ -1170,7 +1397,7 @@ var portraitMode, gameTools, runtime, translator, root, launch, previousFocus, o
 var opened = false, dirty = false, tab = 'variables', query = '', filter = 'all', page = 0, selected = null, found = [];
 var chosenActor = '', checked = {}, modalMode = '', modalFocus = null, exactValue = '';
 function picked() { return Object.keys(checked).map(function(k) { return checked[k]; }); }
-var labels = { favorites: 'Favoris', variables: 'Variables', switches: 'Interrupteurs', selfSwitches: 'Interr. locaux', items: 'Objets', weapons: 'Armes', armors: 'Armures', actors: 'Acteurs', skills: 'Compétences', states: 'États', strings: 'Textes', database: 'Base variable', resources: 'HP / MP', stats: 'Stats', party: 'Partie', translations: 'Traductions', history: 'Historique' };
+var labels = { favorites: 'Favoris', variables: 'Variables', switches: 'Interrupteurs', selfSwitches: 'Interr. locaux', items: 'Objets', weapons: 'Armes', armors: 'Armures', actors: 'Acteurs', skills: 'Compétences', states: 'États', strings: 'Textes', database: 'Base variable', gearSlots: 'Emplacements équipés', resources: 'HP / MP', stats: 'Stats', party: 'Partie', translations: 'Traductions', history: 'Historique' };
 function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function(c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 function $(selector) { return root.querySelector(selector); }
 function button(text, action, cls) { return '<button type="button" data-action="' + action + '" class="' + (cls || '') + '">' + text + '</button>'; }
@@ -1267,7 +1494,8 @@ function buildRoot() {
     });
 }
 function renderNav() {
-    $('#rt-category').innerHTML = (toolkitHost ? ['favorites'].concat(runtime.kinds) : Object.keys(labels).filter(function(k) { return k !== 'translations'; })).map(function(k) { return '<option value="' + k + '">' + esc(labels[k]) + '</option>'; }).join('');
+    var tabs = toolkitHost ? ['favorites'].concat(runtime.kinds) : ['favorites','variables','switches','selfSwitches','items','weapons','armors','actors','skills','states','party','history'];
+    $('#rt-category').innerHTML = tabs.map(function(k) { return '<option value="' + k + '">' + esc(labels[k]) + '</option>'; }).join('');
     $('#rt-category').value = tab;
 }
 function render() {
@@ -1281,6 +1509,15 @@ function openModal(mode, title) {
 }
 function closeModal() {
     if (!modalMode) return;
+    var backToGearEntry = opened && modalMode === 'equipment' && gearView && gearView.fromEditor && selected;
+    clearTimeout(gearTimer);
+    gearView = null;
+    if (backToGearEntry) {
+        openModal('edit', 'Éditer · #' + selected.id);
+        $('.rt-modal-content').innerHTML = '<div class="rt-detail"></div>';
+        renderDetail();
+        return;
+    }
     toolboxMapToken++; modalMode = ''; $('.rt-modal').hidden = true; $('.rt-panel').removeAttribute('aria-hidden'); $('.rt-panel').inert = false;
     if (opened) { if (toolboxHome) showToolboxHome(); else renderList(); }
     if (modalFocus && document.contains(modalFocus)) modalFocus.focus(); else $('.rt-panel').focus();
@@ -1326,10 +1563,10 @@ function renderList() {
     updateSelection(); paintIcons();
     if (toolkitHost) toolkitHost.visible(rows);
 }
-function paintIcons() {
+function paintIcons(container) {
     if (!g.ImageManager || !g.ImageManager.loadSystem) return;
     var bitmap = g.ImageManager.loadSystem('IconSet');
-    var canvases = Array.prototype.slice.call(root.querySelectorAll('canvas[data-icon]'));
+    var canvases = Array.prototype.slice.call((container || root).querySelectorAll('canvas[data-icon]'));
     bitmap.addLoadListener(function() {
         var size = g.ImageManager.iconWidth || (g.Window_Base && g.Window_Base._iconWidth) || 32;
         canvases.forEach(function(canvas) {
@@ -1351,7 +1588,7 @@ function renderDetail() {
     if (r.data && r.data.description) html += '<p class="rt-small" data-game-text>' + esc(r.data.description) + '</p>';
     html += '<div class="rt-divider"></div>';
     if (toolkitHost) {
-        html += runtime.editable(r) ? valueForm(v, 'variable') : '<p class="rt-muted">…</p>';
+        html += runtime.editable(r) ? valueForm(v, 'variable') : '<div data-wolf-pending-value class="rt-muted">…</div>';
         html += button('Profil', 'wolf-profile');
     } else if (kind === 'variables') {
         if (runtime.editable(r)) html += valueForm(v, 'variable');
@@ -1362,15 +1599,17 @@ function renderDetail() {
         html += '<p class="rt-muted rt-small">Prix : ' + esc(r.data.price) + ' ' + esc(g.$dataSystem.currencyUnit) + (r.data.itypeId === 2 ? ' · Objet clé' : '') + '</p>';
         if (r.data.params) html += '<p class="rt-small">' + ['HP', 'MP', 'ATK', 'DEF', 'MAT', 'MDF', 'AGI', 'LUK'].map(function(name, i) { return r.data.params[i] ? name + ' ' + (r.data.params[i] > 0 ? '+' : '') + r.data.params[i] : ''; }).filter(Boolean).join(' · ') + '</p>';
         html += '<form data-form="quantity">' + field('Quantité dans le sac / maximum ' + g.$gameParty.maxItems(r.data), 'rt-quantity', v, 'number', 'min="0" max="' + g.$gameParty.maxItems(r.data) + '" step="1" required') + '<button class="rt-primary rt-full" type="submit">Définir la quantité</button></form><div class="rt-actions" style="margin-top:10px">' + button('+1', 'give-one') + button('+10', 'give-ten') + button('−1', 'take-one') + '</div>';
-        if (kind !== 'items') html += '<div class="rt-divider"></div>' + actorTarget() + field('Emplacement (1 = premier emplacement)', 'rt-equip-slot', 1, 'number', 'min="1" step="1" required') + button('Équiper depuis le sac', 'equip', 'rt-full');
+        if (kind !== 'items') html += '<div class="rt-divider"></div>' + actorTarget() + button('Gérer l’équipement', 'open-gear', 'rt-full');
     } else if (kind === 'actors') html += actorEditor(r);
     else if (kind === 'skills' || kind === 'states') html += actorTarget() + '<div class="rt-actions">' + button(kind === 'skills' ? 'Apprendre' : 'Ajouter l’état', kind === 'skills' ? 'learn' : 'add-state', 'rt-primary') + button(kind === 'skills' ? 'Oublier' : 'Retirer l’état', kind === 'skills' ? 'forget' : 'remove-state') + '</div>';
     html += '<div class="rt-divider"></div><form data-form="alias">' + field('Nom anglais · affichage uniquement', 'rt-alias', runtime.alias(r), 'text', 'maxlength="2000" placeholder="Saisir une traduction…"') + '<div class="rt-actions"><button type="submit">Enregistrer le nom</button>' + button('Traduire en ligne', 'translate-one') + '</div></form>';
     detail.innerHTML = html;
-    if (toolkitHost && $('#rt-value-type')) {
-        Array.prototype.forEach.call($('#rt-value-type').options,function(option){option.disabled=r.data.string ? option.value!=='string' : option.value==='string';});
-    }
+    if (toolkitHost) restrictWolfValueType(r);
     updateValueInput(); renderActorContext();
+}
+function restrictWolfValueType(r) {
+    var type = $('#rt-value-type');
+    if (type) Array.prototype.forEach.call(type.options,function(option){option.disabled=r.data.string ? option.value!=='string' : option.value==='string';});
 }
 
 function valueForm(value, form) {
@@ -1391,7 +1630,7 @@ function actorEditor(r) {
     var a = runtime.actor(r.id), html = '<p class="rt-muted rt-small">Nom en partie : ' + esc(a.name()) + '</p>';
     html += '<form data-form="actor-stat"><label class="rt-field"><span>Statistique à modifier</span><select id="rt-stat"><option value="hp">HP · ' + a.hp + '/' + a.mhp + '</option><option value="mp">MP · ' + a.mp + '/' + a.mmp + '</option><option value="tp">TP · ' + a.tp + '/' + a.maxTp() + '</option><option value="level">Niveau · ' + a.level + '/' + a.maxLevel() + '</option><option value="exp">EXP · ' + a.currentExp() + '</option></select></label>' + field('Nouvelle valeur', 'rt-stat-value', a.hp, 'number', 'min="0" step="1" required') + '<button type="submit" class="rt-primary rt-full">Appliquer à cet acteur</button></form>' + button('Soigner complètement', 'recover', 'rt-full') + '<h4>Équipement porté</h4>';
     a.equips().forEach(function(item, i) { html += '<p class="rt-small">' + (i + 1) + '. ' + esc(item && item.name || 'Vide') + (item ? ' <button type="button" data-action="unequip" data-slot="' + i + '">Retirer</button>' : '') + '</p>'; });
-    html += '';
+    html += button('Gérer l’équipement', 'open-gear', 'rt-full');
     return html;
 }
 function renderActorContext() {
@@ -1399,7 +1638,7 @@ function renderActorContext() {
     var a = runtime.actor(Number($('#rt-actor-target').value)), text;
     if (selected.kind === 'skills') text = a.isLearnedSkill(selected.id) ? 'Compétence déjà apprise.' : 'Compétence non apprise.';
     else if (selected.kind === 'states') text = a.isStateAffected(selected.id) ? 'État actuellement actif.' : 'État actuellement absent.';
-    else text = a.equipSlots().map(function(type, i) { return (i + 1) + ' : ' + (g.$dataSystem.equipTypes[type] || type); }).join(' · ');
+    else text = a.equips().filter(function(item) { return item === selected.data; }).length ? 'Équipé' : '';
     $('#rt-actor-context').textContent = text;
 }
 function renderParty() {
@@ -1484,6 +1723,12 @@ function importFile(file) {
 }
 function act(action, node) {
     if (toolboxAction(action, node)) return;
+    if (action.indexOf('gear-') === 0) { gearAction(action.slice(5), node); return; }
+    if (action === 'open-gear') {
+        if (selected.kind === 'actors') openGear(selected.id, null);
+        else openGear(Number($('#rt-actor-target').value), selected);
+        return;
+    }
     var r, id;
     if (action === 'modal-close' || action === 'modal-dismiss' || action === 'back-results') { closeModal(); return; }
     if (action === 'select') { selected = found[Number(node.getAttribute('data-index'))]; openModal('edit', 'Éditer · #' + selected.id); $('.rt-modal-content').innerHTML = '<div class="rt-detail"></div>'; renderDetail(); return; }
@@ -1526,10 +1771,9 @@ function act(action, node) {
     if (/^(give-one|give-ten|take-one)$/.test(action)) { var delta = action === 'give-ten' ? 10 : (action === 'give-one' ? 1 : -1); runtime.setValue(selected, Math.max(0, Math.min(g.$gameParty.maxItems(selected.data), runtime.value(selected) + delta))); changed('Quantité actuelle : ' + runtime.value(selected) + '.'); return; }
     if (action === 'recover') { runtime.actorAction(selected.id, 'recover'); changed('Acteur soigné.', true); return; }
     if (action === 'unequip') { runtime.equip(selected.id, Number(node.getAttribute('data-slot')), null); changed('Équipement retiré.', true); return; }
-    if (/^(learn|forget|add-state|remove-state|equip)$/.test(action)) {
+    if (/^(learn|forget|add-state|remove-state)$/.test(action)) {
         id = Number($('#rt-actor-target').value);
-        if (action === 'equip') runtime.equip(id, runtime.integer($('#rt-equip-slot').value, 1, 99) - 1, selected);
-        else runtime.actorAction(id, { learn: 'learn', forget: 'forget', 'add-state': 'addState', 'remove-state': 'removeState' }[action], selected.id);
+        runtime.actorAction(id, { learn: 'learn', forget: 'forget', 'add-state': 'addState', 'remove-state': 'removeState' }[action], selected.id);
         changed('Commande appliquée. Consultez l’état actuel de l’acteur.', true);
     }
 }
@@ -1584,7 +1828,7 @@ function closeToolkit() {
     if (previousFocus && document.contains(previousFocus)) previousFocus.focus();
 }
 function toggleToolkit() { return opened ? closeToolkit() : openToolkit(); }
-g.RPGMToolkit = { version: '1.10.0', open: openToolkit, close: closeToolkit, toggle: toggleToolkit, isOpen: function() { return opened; } };
+g.RPGMToolkit = { version: '1.11.0', open: openToolkit, close: closeToolkit, toggle: toggleToolkit, isOpen: function() { return opened; } };
 var heldCloseKey = null;
 g.addEventListener('keydown', function(event) {
     var key = event.key || ({ 117: 'F6', 118: 'F7', 121: 'F10', 27: 'Escape' }[event.keyCode]);
@@ -1632,7 +1876,18 @@ g.SceneManager.updateScene = function() {
 };
 }
 if (toolkitHost) {
-    toolkitHost.attach({ open:openToolkit, refresh:function(){ if(opened){var list=$('.rt-list'), scroll=list?list.scrollTop:0;renderList();if(list)list.scrollTop=scroll; if(modalMode==='edit' && selected && !$('.rt-modal').contains(document.activeElement))renderDetail();} }, status:say, modal:openModal, content:function(html){$('.rt-modal-content').innerHTML=html;}, record:function(){return selected;}, edit:function(record){selected=record;openModal('edit','Édition');$('.rt-modal-content').innerHTML='<section class="rt-detail"></section>';renderDetail();}, runtime:function(){return runtime;}, history:function(){runtime.clearHistory();}, home:showToolboxHome, render:function(){runtime.refresh();renderNav();renderList();}, settings:renderSettings });
+    toolkitHost.attach({ open:openToolkit, refresh:refreshWolfView, status:say, modal:openModal, content:function(html){$('.rt-modal-content').innerHTML=html;}, record:function(){return selected;}, edit:function(record){selected=record;openModal('edit','Édition');$('.rt-modal-content').innerHTML='<section class="rt-detail"></section>';renderDetail();}, runtime:function(){return runtime;}, history:function(){runtime.clearHistory();}, home:showToolboxHome, render:function(){runtime.refresh();renderNav();renderList();}, settings:renderSettings });
+}
+function refreshWolfView() {
+    if (!opened) return;
+    var list = $('.rt-list'), scroll = list.scrollTop;
+    renderList(); list.scrollTop = scroll;
+    if (modalMode !== 'edit' || !selected) return;
+    var pending = $('[data-wolf-pending-value]');
+    if (pending && runtime.editable(selected)) {
+        pending.outerHTML = valueForm(runtime.value(selected), 'variable');
+        restrictWolfValueType(selected); updateValueInput();
+    } else if (!$('.rt-modal').contains(document.activeElement)) renderDetail();
 }
 function openFromInterpreter() { if (openToolkit() && this && this.setWaitMode) this.setWaitMode('rpgmToolkit'); }
 if (g.PluginManager && g.PluginManager.registerCommand) { g.PluginManager.registerCommand('RPGMToolkit', 'Open', openFromInterpreter); g.PluginManager.registerCommand('RPGMToolkit', 'Close', closeToolkit); }
@@ -1672,11 +1927,13 @@ function installToolboxUI() {
     var close = document.createElement('button'); close.type = 'button'; close.textContent = '✕'; close.className = 'rt-close'; close.dataset.action = 'modal-dismiss'; close.setAttribute('aria-label','Fermer la fenêtre'); header.insertBefore(close,header.firstChild);
     root.addEventListener('change', function(event) {
         guarded(function() {
+            gearInput(event);
             if (event.target.id === 'rt-tool-actor' || event.target.id === 'rt-tool-param') updateToolValues();
             if (event.target.id === 'rt-tool-map') loadToolMap();
         });
     });
     root.addEventListener('input', function(event) {
+        gearInput(event);
         if (event.target.id === 'rt-map-query') { renderToolMaps(event.target.value); loadToolMap(); }
     });
     if (g.MutationObserver) new g.MutationObserver(fitToolboxModal).observe($('.rt-modal'),{childList:true,subtree:true,characterData:true});
@@ -1686,6 +1943,7 @@ function showToolboxHome() {
     var state = gameTools.state();
     var entries = [
         ['editors','Éditeurs','Variables, objets, armes, armures…'],
+        ['equipment','Équipements','Armes et armures par personnage'],
         ['translations','Traductions','Noms anglais · tout traduire et reprendre'],
         ['god','Godmode','HP au maximum · protection contre K.O.'],
         ['noclip','No Clip','Traverser les obstacles de la carte'],
@@ -1773,6 +2031,7 @@ function toolboxAction(action, node) {
     if (mode === 'close') closeToolkit();
     else if (mode === 'god' || mode === 'noclip') { if (mode === 'god') gameTools.setGod(!gameTools.state().god); else gameTools.setNoclip(!gameTools.state().noclip); node.setAttribute('aria-checked', String(gameTools.state()[mode])); }
     else if (mode === 'home') showToolboxHome();
+    else if (mode === 'equipment') openGear(null, null);
     else if (mode === 'editors') { toolboxHome = false; root.classList.remove('rt-home-open'); render(); $('.rt-panel').focus(); }
     else if (mode === 'place-go') visitPlace(node.getAttribute('data-place'));
     else if (mode === 'place-delete') { gameTools.travel.forget(Number(node.getAttribute('data-place'))); renderPlaces(); }

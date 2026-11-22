@@ -149,6 +149,18 @@
 .rt .rt-place-row small { display:block; color:#bdc8d8; }
 .rt #rt-places { margin:12px 0; }
 
+.rt .rt-gear-fields { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:8px; }
+.rt .rt-gear-fields select { width:100%; min-width:0; }
+.rt .rt-gear-worn, .rt .rt-gear-name, .rt .rt-gear-controls, .rt .rt-gear-owned { display:flex; align-items:center; gap:8px; }
+.rt .rt-gear-worn { justify-content:space-between; margin:0 0 12px; }
+.rt .rt-gear-worn strong, .rt .rt-gear-list strong { display:block; overflow-wrap:anywhere; }
+.rt .rt-gear-list { padding:0; margin:8px 0; list-style:none; }
+.rt .rt-gear-list li { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:6px 12px; padding:7px 0; border-top:1px solid #414651; }
+.rt .rt-gear-controls { flex-wrap:wrap; gap:4px; }
+.rt .rt-gear-list small, .rt .rt-gear-worn small, .rt .rt-gear-count { color:#bdc8d8; }
+.rt .rt-gear-pages { justify-content:center; align-items:center; }
+.rt .rt-gear-pages:empty { display:none; }
+
 .rt.rt-close-recall .rt-footer { padding-left:42px; }
 .rt.rt-close-recall .rt-modal { padding-bottom:42px; }
 .rt.rt-close-recall .rt-home-content { padding-bottom:42px; }

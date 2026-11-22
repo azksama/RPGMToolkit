@@ -22,7 +22,7 @@ test('WOLF large catalogue: paged editing, profile beyond 20k and native reads l
    const catalog=Array.from({length:100000},(_,i)=>({reference:1100000000+Math.floor(i/10)*100+i%10,name:'row-'+Math.floor(i/10)+' / '+i%10,string:i%2===1,group:'Database',alias:null}));
    localStorage.setItem('wolf-profile-v1:large',JSON.stringify({format:'wolf-toolkit-profile-v1',project:'large',pollMs:2000,entries:catalog.filter(e=>!e.string).slice(0,20001).map(e=>({reference:e.reference,role:'variable',label:'',team:'ally',target:'',maximum:0,icon:null}))}));
    window.wolfValues={};window.wolfLocks={};window.wolfCalls=[];
-   window.WolfNative={bootstrap:()=>JSON.stringify({catalog,project:'large',title:'Large WOLF',version:'1.10.0'}),request:(id,text)=>{
+   window.WolfNative={bootstrap:()=>JSON.stringify({catalog,project:'large',title:'Large WOLF',version:'1.11.0'}),request:(id,text)=>{
     const ops=JSON.parse(text);wolfCalls.push(ops);
     setTimeout(()=>ToolkitHost.answer({id,result:{results:ops.map(op=>{
      if(op.action===1||op.action===2)wolfValues[op.index]=op.value;
@@ -75,16 +75,19 @@ test('WOLF shared mobile editor: profiles, native acknowledgements, bulk actions
      {reference:2000003,role:'hp',label:'Enemy HP',team:'enemy',target:'Enemy',maximum:0,icon:null},
      {reference:2000004,role:'item',label:'Potion',team:'ally',target:'Bag',maximum:0,icon:1},
      {reference:2000005,role:'bool',label:'Door',team:'ally',target:'Map',maximum:0,icon:null},
-     {reference:2000006,role:'stat',label:'Attack',team:'ally',target:'Hero',maximum:0,icon:null}
+     {reference:2000006,role:'stat',label:'Attack',team:'ally',target:'Hero',maximum:0,icon:null},
+     {reference:2000010,role:'weapon',label:'Sword',team:'ally',target:'Bag',equipId:0},
+     {reference:2000011,role:'weaponSlot',label:'Main hand',team:'ally',target:'Hero',emptyValue:-1}
     ]};
     if(!localStorage.getItem('wolf-profile-v1:fixture'))localStorage.setItem('wolf-profile-v1:fixture',JSON.stringify(profile));
     window.wolfValues={1:12,2:500,3:100,4:0,5:0,6:10,300:'日本語',301:30};window.wolfLocks={};window.wolfCalls=[];window.wolfClosed=0;window.wolfNoclip=false;
     window.WolfNative={
-     bootstrap:()=>JSON.stringify({catalog,project:'fixture',title:'Test WOLF',version:'1.10.0'}),
+     bootstrap:()=>JSON.stringify({catalog,project:'fixture',title:'Test WOLF',version:'1.11.0'}),
      request:(id,text)=>{
       const ops=JSON.parse(text);wolfCalls.push(ops);
       if(window.wolfOffline){setTimeout(()=>ToolkitHost.answer({id,error:'Offline fixture'}),10);return;}
-      setTimeout(()=>{
+      const answer=()=>{
+       if(window.wolfHoldString && ops.some(op=>op.action===0 && op.index===300)){setTimeout(answer,10);return;}
        const results=ops.map(op=>{
         if(op.action===1||op.action===2)wolfValues[op.index]=op.value;
         if(op.action===3)wolfLocks[op.index]=true;if(op.action===4)delete wolfLocks[op.index];
@@ -92,12 +95,35 @@ test('WOLF shared mobile editor: profiles, native acknowledgements, bulk actions
         return {index:op.index,error:0,frozen:wolfLocks[op.index]?1:0,value:op.index<0?(window.wolfNoclip?1:0):wolfValues[op.index]??0};
        });
        ToolkitHost.answer({id,result:{results,noclip:window.wolfNoclip?1:0,locks:Object.keys(wolfLocks).length,position:{mapId:1,x:5,y:5,direction:2},...(ops.some(op=>op.action===6)?{saveFile:'toolkit-save-42.sav'}:{})}});
-      },10);
+      };
+      setTimeout(answer,10);
      },saves:()=>JSON.stringify([]),close:()=>{wolfClosed++;},settings:()=>{},exportJson:(name,text)=>{window.wolfExport={name,text};}
     };
    });
    await page.goto('http://127.0.0.1:'+server.address().port+'/index.html');
    await page.evaluate(()=>ToolkitHost.show());
+   await page.locator('[data-action="tool-equipment"]').click();
+   await page.waitForFunction(()=>document.querySelector('[data-wolf-value="2000010"]')?.textContent==='0');
+   await page.locator('[data-action="wolf-gear-give"]').click();
+   await page.waitForFunction(()=>wolfValues[10]===1);
+   await page.locator('[data-action="wolf-gear-slot"]').click();
+   await page.locator('[data-action="wolf-gear-clear"]').click();
+   await page.waitForFunction(()=>wolfValues[11]===-1);
+   await page.locator('[data-action="wolf-gear-choose"]').click();
+   await page.waitForFunction(()=>wolfValues[11]===0);
+   await page.locator('#wolf-equip-id').fill('19');
+   await page.locator('[data-form="wolf-equip"] button').click();
+   await page.waitForFunction(()=>wolfValues[11]===19);
+   assert.equal(await page.evaluate(()=>wolfValues[10]),1);
+   await page.locator('[data-action="modal-dismiss"]').click();
+   await page.locator('[data-action="tool-wolf-profile"]').click();
+   await page.locator('[data-action="wolf-profile-ref"][data-ref="2000011"]').click();
+   assert(await page.locator('#wolf-empty').isVisible());
+   assert.equal(await page.locator('#wolf-empty').inputValue(),'-1');
+   await page.locator('#wolf-empty').fill('0');
+   await page.locator('[data-form="wolf-profile"] button[type="submit"]').click();
+   await page.waitForFunction(()=>JSON.parse(localStorage.getItem('wolf-profile-v1:fixture')).entries.find(p=>p.reference===2000011).emptyValue===0);
+   await page.locator('[data-action="modal-dismiss"]').click();
    await page.locator('[data-action="tool-resources"]').click();
    await page.waitForFunction(()=>wolfCalls.some(ops=>ops.some(op=>op.index===1)));
    await page.waitForTimeout(30);
@@ -129,8 +155,14 @@ test('WOLF shared mobile editor: profiles, native acknowledgements, bulk actions
    await page.locator('[data-action="bulk-edit"]').click();await page.locator('#rt-value').fill('99');await page.locator('form[data-form="bulk"] button[type="submit"]').click();
    await page.waitForFunction(()=>wolfValues[7]===99 && wolfValues[8]===99);
    assert(await page.locator('.rt-modal').isHidden());assert.equal(await page.evaluate(()=>wolfClosed),0);
-   await choose(page,'rt-category','strings');await page.waitForTimeout(40);
+   await page.evaluate(()=>{window.wolfHoldString=true;});
+   await choose(page,'rt-category','strings');
    await page.locator('.rt-row [data-action="select"]').last().click();
+   assert(await page.locator('[data-wolf-pending-value]').isVisible());
+   await page.locator('#rt-alias').fill('Pending alias');
+   await page.evaluate(()=>{window.wolfHoldString=false;});
+   await page.locator('#rt-value').waitFor();
+   assert.equal(await page.locator('#rt-alias').inputValue(),'Pending alias');
    await page.locator('#rt-value').fill('日本語\n"text"\\literal');await page.locator('form[data-form="variable"] button[type="submit"]').click();
    await page.waitForFunction(()=>wolfValues[300]==='日本語\n"text"\\literal');
    await page.locator('#rt-alias').fill('English name');await page.locator('form[data-form="alias"] button[type="submit"]').click();

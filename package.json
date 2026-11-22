@@ -1,6 +1,6 @@
 {
   "name": "rpgm-toolkit",
-  "version": "1.10.0",
+  "version": "1.11.0",
   "private": true,
   "scripts": {
     "build:mod": "node plugin/build.cjs",
@@ -9,6 +9,7 @@
     "test:installer": "pwsh -NoProfile -ExecutionPolicy Bypass -File plugin/tests/installer.test.ps1",
     "test:mobile": "node --test android/tests/mobile-layout.test.cjs android/tests/toolbox-mobile.test.cjs",
     "test:travel": "node --test plugin/tests/travel-ui.test.cjs",
+    "test:equipment": "node --test plugin/tests/equipment-ui.test.cjs",
     "test:wolf": "npm run build:mod && node --test wolf/tests/ui.test.cjs && cargo test --manifest-path wolf/Cargo.toml --locked",
     "test:portrait": "node --test plugin/tests/portrait.test.cjs plugin/tests/portrait-ui.test.cjs"
   },

@@ -312,20 +312,83 @@ function createToolkitRuntime(g, storage) {
         note(a.name() + ' · ' + label, old, n, false);
         return a;
     }
-    function equip(id, slot, record) {
-        if (g.$gameParty.inBattle()) throw new Error('Équipement disponible hors combat.');
-        var a = actor(id), slots = a.equipSlots();
-        slot = integer(slot, 0, slots.length - 1);
-        var item = record ? record.data : null;
-        if (!a.isEquipChangeOk(slot)) throw new Error('Cet emplacement est verrouillé par le jeu.');
-        if (record) {
-            assertRecord(record);
-            if (!/^(weapons|armors)$/.test(record.kind) || slots[slot] !== item.etypeId || !a.canEquip(item)) throw new Error('Cet équipement ne convient pas à cet acteur ou à cet emplacement.');
-            if (!g.$gameParty.hasItem(item, false)) throw new Error('Ajoutez cet équipement à l’inventaire avant de l’équiper.');
+    function gearRecord(item) {
+        if (!item) return null;
+        if (g.$dataWeapons[item.id] === item) return record('weapons', item.id);
+        if (g.$dataArmors[item.id] === item) return record('armors', item.id);
+        return null;
+    }
+    function gearFits(a, type, r) {
+        return (r.kind === 'weapons' || r.kind === 'armors') && r.data.etypeId === type && a.canEquip(r.data);
+    }
+    function checkGearReturns(a, before, slot, item) {
+        var planned = before.slice(), preview = Object.create(a);
+        planned[slot] = item;
+        if (a.releaseUnequippableItems) {
+            preview.equips = function() { return planned.slice(); };
+            var changed;
+            do {
+                changed = false;
+                var types = preview.equipSlots();
+                planned.forEach(function(piece, i) {
+                    if (piece && (piece.etypeId !== types[i] || !preview.canEquip(piece))) {
+                        planned[i] = null;
+                        changed = true;
+                    }
+                });
+            } while (changed);
+            if (planned[slot] !== item) throw new Error('Le moteur a refusé cet équipement.');
         }
-        var old = a.equips()[slot]; a.changeEquip(slot, item);
-        if (a.equips()[slot] !== item) throw new Error('Le moteur a refusé cet équipement.');
+        var returned = [];
+        before.forEach(function(piece, i) {
+            if (!piece || piece === planned[i]) return;
+            var record = gearRecord(piece);
+            if (record && frozen[record.key]) throw new Error('Libérez la quantité figée avant cet échange.');
+            returned.push(piece);
+            var copies = returned.filter(function(o) { return o === piece; }).length;
+            var count = g.$gameParty.numItems(piece);
+            if (piece === item) count = Math.max(0, count - 1);
+            if (count + copies > g.$gameParty.maxItems(piece)) throw new Error('Le sac est plein pour l’équipement à retirer.');
+        });
+    }
+    function equip(id, slot, entry, grantMissing) {
+        ensureSession();
+        if (g.$gameParty.inBattle()) throw new Error('Équipement disponible hors combat.');
+        var party = g.$gameParty, a = actor(id), slots = a.equipSlots();
+        slot = integer(slot, 0, slots.length - 1);
+        var before = a.equips().slice(), old = before[slot] || null;
+        var item = entry ? entry.data : null;
+        if (!a.isEquipChangeOk(slot)) throw new Error('Cet emplacement est verrouillé par le jeu.');
+        if (entry) {
+            assertRecord(entry);
+            if (!gearFits(a, slots[slot], entry)) throw new Error('Cet équipement ne convient pas à cet acteur ou à cet emplacement.');
+        }
+        if (old === item) return false;
+        if (entry && frozen[entry.key]) throw new Error('Libérez la quantité figée avant cet échange.');
+        checkGearReturns(a, before, slot, item);
+        var oldCount = old ? party.numItems(old) : 0, itemCount = item ? party.numItems(item) : 0;
+        if (item && !itemCount && !grantMissing) throw new Error('Ajoutez cet équipement à l’inventaire avant de l’équiper.');
+        try {
+            if (item && !itemCount) {
+                party.gainItem(item, 1, false);
+                if (party.numItems(item) !== 1) throw new Error('Le moteur a refusé l’ajout au sac.');
+            }
+            a.changeEquip(slot, item);
+            if ((a.equips()[slot] || null) !== item) throw new Error('Le moteur a refusé cet équipement.');
+        } catch (error) {
+            var now = a.equips();
+            if (now.length === before.length && before.every(function(e, i) { return e === now[i]; })) {
+                [[item, itemCount], [old, oldCount]].forEach(function(pair) {
+                    if (!pair[0]) return;
+                    var delta = pair[1] - party.numItems(pair[0]);
+                    if (delta) party.gainItem(pair[0], delta, false);
+                    if (party.numItems(pair[0]) !== pair[1]) throw new Error('Vérifiez le sac : le moteur a refusé la restauration.');
+                });
+            }
+            throw error;
+        }
         history = []; redo = []; note(a.name() + ' · équipement', old && old.name || '—', item && item.name || '—', false);
+        return true;
     }
     function setAliases(records, text) {
         records.forEach(assertRecord);
@@ -360,6 +423,7 @@ function createToolkitRuntime(g, storage) {
         editable: editable, setMany: setMany, freezeMany: freezeMany, enforceFrozen: enforceFrozen,
         isFrozen: function(r) { ensureSession(); return host ? host.frozen(r) : !!frozen[r.key]; }, frozenCount: function() { ensureSession(); return host ? host.frozenCount() : Object.keys(frozen).length; },
         search: search, printable: printable, integer: integer, setValue: setValue, gold: gold, actor: actor, actorAction: actorAction, equip: equip,
+        gearRecord: gearRecord, gearFits: gearFits,
         undo: function() { undoAction(false); }, redo: function() { undoAction(true); },
         canUndo: function() { ensureSession(); return history.length > 0; }, canRedo: function() { ensureSession(); return redo.length > 0; },
         log: function() { ensureSession(); return log; }, capture: capture, changed: changed,

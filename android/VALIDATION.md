@@ -1,3 +1,14 @@
+# Validation 1.11.0
+
+22 novembre 2026. Dans la WebView d’Android Emulator, le test du module embarqué ouvre **Toolbox → Équipements**, crée et équipe un arc, le retire et vérifie le contenu du sac ainsi que le retour au menu.
+
+- 71 tests JavaScript, dont les échanges sur le moteur MV, les écrans portrait/paysage et les champs d’équipement du profil WOLF.
+- Six exécutions du banc RGSS couvrent XP, VX et VX Ace en deux tailles d’écran. Le test passe par le menu de personnage pour équiper et retirer une arme.
+- 33 tests Rust de l’installateur, 10 tests Rust WOLF et 24 assertions PowerShell.
+- Les modules JavaScript et Ruby ont été comparés aux octets embarqués dans les trois bibliothèques de l’APK signé. Les fichiers de la WebView WOLF correspondent aux sources. Le certificat de signature correspond à celui de la 1.10.0.
+
+JoiPlay et Winlator sur téléphone, ainsi que le parcours Play Protect de cette préversion, restent à valider.
+
 # Validation 1.10.0
 
 Vérifications du 17 novembre 2026.

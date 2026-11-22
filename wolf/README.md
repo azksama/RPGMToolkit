@@ -1,4 +1,4 @@
-# WOLF Toolkit 1.10.0
+# WOLF Toolkit 1.11.0
 
 Éditeur mobile flottant pour WOLF RPG Editor 2 et 3 sous Winlator. L’interface réutilise le Toolkit MV/MZ : recherche, favoris, sélection multiple, édition en fenêtre, gel, historique, alias anglais et traductions persistantes.
 
@@ -15,6 +15,12 @@ Un ZIP contenant un seul jeu peut également être installé ou désinstallé. E
 WOLF permet à chaque jeu de définir son système. Le catalogue contient les variables numériques, les chaînes et les champs de la base variable. Depuis l’édition d’un champ, **Profil** lui associe un rôle : objet, arme, armure, interrupteur, HP, MP, TP, statistique ou argent. Les ressources peuvent être associées à un allié ou un ennemi et à un champ de maximum.
 
 Les catégories d’inventaire et les menus HP/MP et Stats utilisent ces associations. Godmode fige les HP des alliés du profil et les remplit lorsqu’un maximum est associé. No Clip utilise la commande de déplacement native. Les profils s’importent et s’exportent en JSON.
+
+**Toolbox → Équipements** utilise les champs numériques associés dans le profil du jeu.
+
+- Pour une quantité dans le sac, choisissez **Arme** ou **Armure**. Renseignez l’ID d’équipement du jeu pour proposer l’objet par son nom.
+- Pour un objet porté, choisissez **Emplacement d’arme** ou **Emplacement d’armure**, le personnage cible et la valeur utilisée par ce jeu pour un emplacement vide.
+- **Équiper** écrit l’ID choisi et **Déséquiper** rétablit la valeur vide. Les boutons **+1** et **−1** ajustent le champ de quantité indépendamment. Enregistrez la partie pour conserver les changements.
 
 La langue, les favoris, les profils et les traductions restent dans les données privées de l’application après fermeture du jeu. Un export permet de les conserver avant de désinstaller l’application.
 

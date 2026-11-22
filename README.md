@@ -1,8 +1,8 @@
 # RPGM Toolkit
 
-Mod intégré pour RPG Maker XP, VX, VX Ace, MV et MZ, éditeur WOLF pour Winlator et installateur Android **Rust + Tauri 2**, version **1.10.0**.
+Mod intégré pour RPG Maker XP, VX, VX Ace, MV et MZ, éditeur WOLF pour Winlator et installateur Android **Rust + Tauri 2**, version **1.11.0**.
 
-**1.10.0 en préversion :** Play Protect a bloqué l’installation pendant le contrôle Android. Le téléchargement et l’intégrité de l’updater sont vérifiés ; l’installation sans alerte reste à valider. [Résultats détaillés](docs/validation/1.10.0-updater.md). La dernière version stable reste 1.9.4.
+La [préversion 1.11.0](https://github.com/azksama/RPGMToolkit/releases/tag/v1.11.0) ajoute **Toolbox → Équipements**. La version stable distribuée par l’updater est la 1.9.4. [Contrôle Play Protect de la 1.10.0](docs/validation/1.10.0-updater.md).
 
 Le [guide WOLF](wolf/README.md) décrit le menu flottant, les profils d’objets/HP/stats et les formats pris en charge. Les dossiers RPG Maker peuvent contenir directement `js/` et `data/`, sans `www/`, ou se trouver dans des sous-dossiers comme `Data/`.
 
@@ -68,4 +68,4 @@ Voir [le guide RGSS](plugin/rgss/README.md) pour XP/VX/VX Ace. Les fichiers `plu
 
 L’installateur PowerShell concerne MV/MZ. L’APK inclut les modules JavaScript, Ruby et WOLF et sélectionne automatiquement celui du moteur détecté. RPG Maker 2000/2003 ne sont pas pris en charge.
 
-Le mode **Portrait plein écran** de la 1.8 concerne MV/MZ ; la variante RGSS reste en 1.7.0. Voir [les réglages et limites](plugin/TOOLBOX.md#portrait-plein-écran--mvmz).
+Le mode **Portrait plein écran** concerne MV/MZ. [Réglages du mode portrait](plugin/TOOLBOX.md#portrait-plein-écran--mvmz).

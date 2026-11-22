@@ -1,11 +1,17 @@
-# RPGM Toolkit 1.7.0 - RGSS1 / RGSS2 / RGSS3
+# RPGM Toolkit 1.11.0 - RGSS1 / RGSS2 / RGSS3
 # SPDX-License-Identifier: MIT
 module RPGMToolkit
-  VERSION = '1.7.0'
+  VERSION = '1.11.0'
   FILE = 'RPGMToolkit-settings.dat'
   DICTIONARY = 'RPGMToolkit-translations.tsv'
   CATEGORIES = [:variables, :switches, :self_switches, :items, :weapons, :armors, :actors, :skills, :states, :favorites]
   LABELS = {
+    :equipment=>['Equipements','Equipment'], :gear_choices=>['Equipements compatibles','Compatible equipment'],
+    :gear_item=>['Equipement','Equipment'], :equip=>['Equiper','Equip'], :create_equip=>['Creer et equiper','Create and equip'],
+    :remove_gear=>['Desequiper','Unequip'], :bag=>['Sac','Bag'], :owned=>['En stock','In stock'],
+    :empty_slot=>['Vide','Empty'], :locked=>['Emplacement verrouille','Locked slot'], :no_party=>['Aucun membre','No party members'],
+    :full_bag=>['Sac plein','Bag full'], :frozen_stock=>['Quantite figee','Frozen quantity'], :no_gear=>['Aucun equipement compatible','No matching equipment'],
+    :gear_denied=>['Equipement refuse par le jeu','Equipment refused by the game'], :outside_battle=>['Disponible hors combat','Available outside battle'],
     :editors=>['Editeurs','Editors'], :translations=>['Traductions','Translations'],
     :god=>['Godmode','Godmode'], :noclip=>['No Clip','No Clip'], :resources=>['HP / MP','HP / MP'],
     :stats=>['Stats','Stats'], :teleport=>['Teleportation','Teleport'], :party=>['Partie','Party'],
@@ -32,6 +38,7 @@ module RPGMToolkit
     :button_y=>['Position verticale','Vertical position'], :bottom_close=>['Fermeture en bas a gauche','Close button at bottom left']
   }
   DESCRIPTIONS = {
+    :equipment=>['Armes et armures par personnage','Weapons and armor by character'],
     :editors=>['Variables, objets, armes, armures','Variables, items, weapons, armor'],
     :translations=>['Noms anglais et dictionnaire','English names and dictionary'],
     :god=>['HP au maximum, protection K.O.','Full HP, knockout protection'],
@@ -158,6 +165,108 @@ module RPGMToolkit
       value(r)
     ensure
       @writing=false
+    end
+    def gear_slots(a)
+      return a.equip_slots if engine==3
+      [0,engine==2 && a.two_swords_style ? 0 : 1,2,3,4]
+    end
+    def worn_gear(a)
+      return a.equips unless engine==1
+      [$data_weapons[a.weapon_id],$data_armors[a.armor1_id],$data_armors[a.armor2_id],$data_armors[a.armor3_id],$data_armors[a.armor4_id]]
+    end
+    def gear_slot_name(type)
+      if engine==3 && $data_system.respond_to?(:terms)
+        label=$data_system.terms.etypes[type]
+      elsif type>=0 && type<=4
+        source=engine==1 ? :words : :terms
+        term=[:weapon,:armor1,:armor2,:armor3,:armor4][type]
+        terms=$data_system.send(source) if $data_system.respond_to?(source)
+        label=terms.send(term) if terms && terms.respond_to?(term)
+      end
+      return label unless label.to_s.empty?
+      names=prefs['language']=='en' ? ['Weapon','Shield','Head','Body','Accessory'] : ['Arme','Bouclier','Tete','Corps','Accessoire']
+      names[type] || '#'+type.to_s
+    end
+    def gear_locked?(a,slot)
+      case engine
+      when 1 then a.equip_fix?(slot)
+      when 2 then a.fix_equipment
+      else !a.equip_change_ok?(slot)
+      end
+    end
+    def gear_record(item)
+      return nil unless item
+      kind=$data_weapons[item.id].equal?(item) ? :weapons : :armors
+      [kind,item.id,item.name,item]
+    end
+    def gear_fits?(a,type,r)
+      item=r[3]
+      slot=engine==3 ? item.etype_id : (r[0]==:weapons ? 0 : item.kind+1)
+      slot==type && a.equippable?(item)
+    end
+    def bag_limit(r)
+      $game_party.respond_to?(:max_item_number) ? $game_party.max_item_number(r[3]) : 99
+    end
+    def ace_gear_returns(a,before,slot,item)
+      planned=before.dup; planned[slot]=item
+      preview=a.dup
+      preview.instance_variable_set(:@toolkit_gear,planned)
+      def preview.equips; @toolkit_gear.dup; end
+      loop do
+        changed=false
+        planned.each_with_index do |piece,i|
+          if piece && (!preview.equippable?(piece) || piece.etype_id!=preview.equip_slots[i])
+            planned[i]=nil; changed=true
+          end
+        end
+        break unless changed
+      end
+      raise t(:gear_denied) unless planned[slot].equal?(item)
+      before.each_with_index.collect { |piece,i| piece unless planned[i].equal?(piece) }.compact
+    end
+    def equip_gear(a,slot,r,create=false)
+      raise t(:outside_battle) if battle?
+      slots=gear_slots(a)
+      raise t(:locked) unless slot && slot>=0 && slot<slots.size && !gear_locked?(a,slot)
+      raise t(:gear_denied) if r && !gear_fits?(a,slots[slot],r)
+      before=worn_gear(a).dup
+      old=before[slot]; item=r && r[3]
+      return false if old.equal?(item)
+      outgoing=[old].compact
+      if engine==3
+        outgoing=ace_gear_returns(a,before,slot,item)
+      elsif engine==2 && slot<2 && item
+        other=before[1-slot]
+        two_handed=[item,other].compact.any? { |o| o.respond_to?(:two_handed) && o.two_handed }
+        outgoing << other if other && two_handed
+      end
+      counts={}
+      outgoing.each do |o|
+        rec=gear_record(o)
+        raise t(:frozen_stock) if frozen[key(rec)]
+        counts[o] ||= value(rec)
+        after_use=o.equal?(item) ? [0,counts[o]-1].max : counts[o]
+        raise t(:full_bag) if after_use+outgoing.select { |x| x.equal?(o) }.size>bag_limit(rec)
+      end
+      if r
+        raise t(:frozen_stock) if frozen[key(r)]
+        counts[item]=value(r)
+        raise t(:gear_denied) if counts[item]==0 && !create
+      end
+      begin
+        if r && counts[item]==0
+          raise t(:gear_denied) unless assign(r,1,false)==1
+        end
+        engine==1 ? a.equip(slot,item ? item.id : 0) : a.change_equip(slot,item)
+        raise t(:gear_denied) unless worn_gear(a)[slot].equal?(item)
+      rescue StandardError
+        if worn_gear(a)==before
+          counts.each { |o,n| rec=gear_record(o); assign(rec,n,false) if value(rec)!=n }
+        end
+        raise
+      end
+      journal.clear
+      true
     end
     def frozen_value(category,id,v)
       return v if @writing
@@ -462,6 +571,8 @@ module RPGMToolkit
     def scroll(n); @scroll=[[@scroll+n*32,0].max,@max_scroll].min; end
     def back
       if @modal then @modal=nil; @filtered=nil
+      elsif @mode==:gear_item then mode(:gear_choices)
+      elsif @mode==:gear_choices then mode(:equipment)
       elsif @mode==:home then @done=true
       else @mode=:home; @scroll=0; @focus=0 end
     end
@@ -494,7 +605,7 @@ module RPGMToolkit
       @b.fill_rect(@w-width+4,y,width-8,height,color([155,177,207]))
     end
     def draw_home
-      [:editors,:translations,:god,:noclip,:resources,:stats,:teleport,:party,:history,:settings].each do |m|
+      [:editors,:equipment,:translations,:god,:noclip,:resources,:stats,:teleport,:party,:history,:settings].each do |m|
         title=t(m); title+='   '+((m==:god ? RPGMToolkit.god : RPGMToolkit.noclip) ? '[ON]' : '[OFF]') if [:god,:noclip].include?(m)
         row(title,DESCRIPTIONS[m][RPGMToolkit.prefs['language']=='en' ? 1 : 0]) do
           if m==:god then RPGMToolkit.god=!RPGMToolkit.god
@@ -509,7 +620,7 @@ module RPGMToolkit
     def draw_modal
       text(12,4,@w-50,30,@modal[:label]); button(@w-38,4,32,30,'X') { @modal=nil }
       @b.fill_rect(10,42,@w-20,34,color([19,23,29])); text(16,42,@w-32,34,@modal[:text])
-      chars=@modal[:shift] ? 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,-_:/ ' : 'abcdefghijklmnopqrstuvwxyz0123456789.,-_:/ '
+      chars=@modal[:shift] ? 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,-_:/# ' : 'abcdefghijklmnopqrstuvwxyz0123456789.,-_:/# '
       @top=84; @bottom=@h-44; cellw=(@w-24)/10; cellh=[32,(@bottom-@top-42)/5].max
       chars.split('').each_with_index do |c,i|
         y=@top+(i/10)*cellh-@scroll
@@ -597,8 +708,62 @@ module RPGMToolkit
       button(16+w*2,y+32,w,32,'+1000') { setter.call(value+1000) }
       button(20+w*3,y+32,w,32,t(:edit)) { prompt(label,value) { |v| setter.call(Integer(v)) } }
     end
+    def draw_equipment
+      party=RPGMToolkit.members
+      return row(t(:no_party)) {} if party.empty?
+      @gear_actor=party.first unless party.include?(@gear_actor)
+      a=@gear_actor; slots=RPGMToolkit.gear_slots(a); worn=RPGMToolkit.worn_gear(a)
+      if @mode==:equipment
+        row(t(:actor)+'  '+a.name) { @gear_actor=party[(party.index(a)+1)%party.size]; @scroll=0 }
+        slots.each_with_index do |type,i|
+          current=RPGMToolkit.gear_record(worn[i])
+          label=(i+1).to_s+'  '+RPGMToolkit.gear_slot_name(type)
+          row(label,current ? RPGMToolkit.name(current) : t(:empty_slot)) do
+            @gear_slot=i; @gear_query=''; @gear_owned=false; @gear_page=0; mode(:gear_choices)
+          end
+        end
+        return
+      end
+      if @gear_slot.nil? || @gear_slot>=slots.size then mode(:equipment); return end
+      i=@gear_slot; type=slots[i]; current=RPGMToolkit.gear_record(worn[i])
+      locked=RPGMToolkit.gear_locked?(a,i) || RPGMToolkit.battle?
+      if @mode==:gear_item
+        r=@gear_item; n=RPGMToolkit.value(r)
+        row(RPGMToolkit.name(r),t(:bag)+'  '+n.to_s) {}
+        unless locked || worn[i].equal?(r[3])
+          row(t(n>0 ? :equip : :create_equip)) { RPGMToolkit.equip_gear(a,i,r,n==0); mode(:gear_choices) }
+        end
+        row(t(:bag)+'   +1') { RPGMToolkit.assign(r,n+1) if n<RPGMToolkit.bag_limit(r) }
+        row(t(:bag)+'   -1') { RPGMToolkit.assign(r,n-1) if n>0 }
+        return
+      end
+      list=@filtered ||= RPGMToolkit.catalog(RPGMToolkit.engine==3 ? [:weapons,:armors] : [type==0 ? :weapons : :armors]).select do |r|
+        (@gear_query.empty? || @gear_query=='#'+r[1].to_s || RPGMToolkit.name(r).downcase.include?(@gear_query) || r[2].downcase.include?(@gear_query)) &&
+          (!@gear_owned || RPGMToolkit.value(r)>0) && RPGMToolkit.gear_fits?(a,type,r)
+      end
+      count=20; pages=[(list.size+count-1)/count,1].max; @gear_page=[@gear_page,pages-1].min
+      @bottom=@h-72 if pages>1
+      row(a.name+'   '+RPGMToolkit.gear_slot_name(type),current ? RPGMToolkit.name(current) : t(:empty_slot)) {}
+      if locked
+        row(t(RPGMToolkit.battle? ? :outside_battle : :locked)) {}
+      elsif current
+        row(t(:remove_gear)) { RPGMToolkit.equip_gear(a,i,nil) }
+      end
+      row(t(:search)+'   '+@gear_query) { prompt(t(:search),@gear_query) { |q| @gear_query=q.strip.downcase; @gear_page=0 } }
+      row((@gear_owned ? '[x] ' : '[ ] ')+t(:owned)) { @gear_owned=!@gear_owned; @gear_page=0 }
+      if pages>1
+        text(8,@h-70,@w-180,30,(@gear_page+1).to_s+' / '+pages.to_s)
+        button(@w-170,@h-70,72,28,'<') { @gear_page=[@gear_page-1,0].max; @scroll=0 }
+        button(@w-92,@h-70,72,28,'>') { @gear_page=[@gear_page+1,pages-1].min; @scroll=0 }
+      end
+      row(t(:no_gear)) {} if list.empty?
+      (list[@gear_page*count,count] || []).each do |r|
+        row('#'+r[1].to_s+'  '+RPGMToolkit.name(r)+'   x'+RPGMToolkit.value(r).to_s) { @gear_item=r; mode(:gear_item) }
+      end
+    end
     def draw_tools
       case @mode
+      when :equipment,:gear_choices,:gear_item then draw_equipment
       when :resources
         targets=RPGMToolkit.members+(RPGMToolkit.battle? ? RPGMToolkit.enemies : [])
         @target=targets[0] unless targets.include?(@target)
